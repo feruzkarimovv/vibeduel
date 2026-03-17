@@ -3,25 +3,187 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --background: #050505;
+  --foreground: #e8e8e8;
+  --neon-green: #0ff47a;
+  --neon-magenta: #ff3366;
+  --neon-cyan: #00e5ff;
+  --arena-line: #1a1a1a;
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
 }
 
+/* Scrollbar — minimal dark */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--neon-green);
+  border-radius: 0;
+}
+
+/* Selection — neon green */
+::selection {
+  background: rgba(15, 244, 122, 0.3);
+  color: white;
+}
+
+/* Scanline overlay effect — pseudo-element, no positioning override needed */
+.scanlines::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.08) 2px,
+    rgba(0, 0, 0, 0.08) 4px
+  );
+  z-index: 1;
+}
+
+/* Noise texture — uses @layer so Tailwind utilities (like `fixed`) can override positioning */
+@layer components {
+  .noise {
+    position: relative;
+  }
+}
+
+.noise::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.04;
+  pointer-events: none;
+  z-index: 1;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 128px 128px;
+}
+
+/* Glitch text */
+.glitch-text {
+  position: relative;
+}
+
+.glitch-text::before,
+.glitch-text::after {
+  content: attr(data-text);
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.glitch-text::before {
+  color: var(--neon-magenta);
+  animation: glitch1 3s infinite linear alternate-reverse;
+  z-index: -1;
+}
+
+.glitch-text::after {
+  color: var(--neon-green);
+  animation: glitch2 2.5s infinite linear alternate-reverse;
+  z-index: -1;
+}
+
+@keyframes glitch1 {
+  0%, 100% { clip-path: inset(0 0 0 0); transform: translate(0); }
+  20% { clip-path: inset(20% 0 60% 0); transform: translate(-2px, 1px); }
+  40% { clip-path: inset(40% 0 30% 0); transform: translate(2px, -1px); }
+  60% { clip-path: inset(60% 0 10% 0); transform: translate(-1px, 2px); }
+  80% { clip-path: inset(10% 0 80% 0); transform: translate(1px, -2px); }
+}
+
+@keyframes glitch2 {
+  0%, 100% { clip-path: inset(0 0 0 0); transform: translate(0); }
+  25% { clip-path: inset(50% 0 20% 0); transform: translate(3px, 0); }
+  50% { clip-path: inset(10% 0 70% 0); transform: translate(-3px, 0); }
+  75% { clip-path: inset(70% 0 5% 0); transform: translate(2px, 0); }
+}
+
+/* Diagonal cut backgrounds */
+.diagonal-cut {
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 60px), 0 100%);
+}
+
+.diagonal-cut-reverse {
+  clip-path: polygon(0 60px, 100% 0, 100% 100%, 0 100%);
+}
+
+/* Neon glow utilities */
 @layer utilities {
+  .glow-green {
+    text-shadow: 0 0 10px var(--neon-green), 0 0 40px rgba(15, 244, 122, 0.3);
+  }
+
+  .glow-magenta {
+    text-shadow: 0 0 10px var(--neon-magenta), 0 0 40px rgba(255, 51, 102, 0.3);
+  }
+
+  .glow-cyan {
+    text-shadow: 0 0 10px var(--neon-cyan), 0 0 40px rgba(0, 229, 255, 0.3);
+  }
+
+  .box-glow-green {
+    box-shadow: 0 0 15px rgba(15, 244, 122, 0.2), 0 0 60px rgba(15, 244, 122, 0.05), inset 0 0 15px rgba(15, 244, 122, 0.05);
+  }
+
+  .box-glow-magenta {
+    box-shadow: 0 0 15px rgba(255, 51, 102, 0.2), 0 0 60px rgba(255, 51, 102, 0.05), inset 0 0 15px rgba(255, 51, 102, 0.05);
+  }
+
   .text-balance {
     text-wrap: balance;
+  }
+}
+
+/* Code textarea */
+textarea::-webkit-scrollbar {
+  width: 4px;
+}
+
+/* Page entrance */
+main {
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Blink cursor for streaming */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* Sandpack overrides */
+.sp-wrapper {
+  background: transparent !important;
+}
+
+.sp-preview-container {
+  background: #050505 !important;
+}
+
+/* Glass utility — kept for duel room */
+@layer utilities {
+  .glass {
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
   }
 }
