@@ -1,8 +1,16 @@
-export default function DuelPage() {
-  return (
-    <main style={{ padding: '40px', color: 'white', background: '#050505', minHeight: '100vh' }}>
-      <h1>Duel Page - Test</h1>
-      <p>If you see this, the route works.</p>
+import dynamic from 'next/dynamic';
+
+const DuelLobby = dynamic(() => import('@/components/duel/DuelLobby'), {
+  ssr: false,
+  loading: () => (
+    <main className="min-h-screen flex items-center justify-center bg-arena-black">
+      <div className="text-zinc-700 font-mono text-sm uppercase tracking-wider animate-pulse">
+        Initializing...
+      </div>
     </main>
-  );
+  ),
+});
+
+export default function DuelPage() {
+  return <DuelLobby />;
 }
