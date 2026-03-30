@@ -1,10 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
-
 export async function POST(req: Request) {
   if (!process.env.ANTHROPIC_API_KEY) {
     return NextResponse.json(
@@ -12,6 +8,10 @@ export async function POST(req: Request) {
       { status: 500 },
     );
   }
+
+  const client = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY,
+  });
 
   try {
     const { challenge, submission1, submission2 } = await req.json();
