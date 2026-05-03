@@ -1,60 +1,56 @@
 import { SupabaseClient } from '@supabase/supabase-js';
-import type { DuelRow } from '@/types';
+import type { DuelRow, Player } from '@/types';
+
+// Matchmaking now goes through server routes that use the service_role key.
+// The client only does SELECT operations directly.
 
 export async function findOrCreateDuel(
-  supabase: SupabaseClient,
+  _supabase: SupabaseClient,
   playerId: string,
   challengeId: string,
+  options?: { private?: boolean },
 ): Promise<DuelRow | null> {
-  // Try to find an existing waiting duel (not our own)
-  const { data: existingDuel } = await supabase
-    .from('duels')
-    .select('*')
-    .eq('status', 'waiting')
-    .neq('player1_id', playerId)
-    .limit(1)
-    .single();
-
-  if (existingDuel) {
-    // Join as player 2 and move to countdown
-    const { data } = await supabase
-      .from('duels')
-      .update({
-        player2_id: playerId,
-        status: 'countdown',
-      })
-      .eq('id', existingDuel.id)
-      .eq('status', 'waiting') // optimistic lock
-      .select()
-      .single();
-
-    return data as DuelRow | null;
-  }
-
-  // No waiting duels — create a new one
-  const { data, error } = await supabase
-    .from('duels')
-    .insert({
+  const res = await fetch('/api/match', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      player_id: playerId,
       challenge_id: challengeId,
-      player1_id: playerId,
-      status: 'waiting',
-    })
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Failed to create duel:', error.message);
+      private: options?.private ?? false,
+    }),
+  });
+  if (!res.ok) {
+    console.error('findOrCreateDuel failed:', res.status, await res.text().catch(() => ''));
     return null;
   }
+  const { duel } = await res.json();
+  return duel as DuelRow;
+}
 
-  return data as DuelRow;
+export async function joinDuelById(
+  playerId: string,
+  duelId: string,
+): Promise<DuelRow | null> {
+  const res = await fetch('/api/match/join', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ player_id: playerId, duel_id: duelId }),
+  });
+  if (!res.ok) return null;
+  const { duel } = await res.json();
+  return duel as DuelRow;
 }
 
 export async function cancelDuel(
-  supabase: SupabaseClient,
+  _supabase: SupabaseClient,
   duelId: string,
+  playerId: string,
 ): Promise<void> {
-  await supabase.from('duels').delete().eq('id', duelId).eq('status', 'waiting');
+  await fetch('/api/match/cancel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ duel_id: duelId, player_id: playerId }),
+  });
 }
 
 export async function fetchDuel(
@@ -65,15 +61,14 @@ export async function fetchDuel(
     .from('duels')
     .select('*')
     .eq('id', duelId)
-    .single();
-
+    .maybeSingle();
   return data as DuelRow | null;
 }
 
 export async function fetchDuelPlayers(
   supabase: SupabaseClient,
   duel: DuelRow,
-): Promise<{ player1: import('@/types').Player | null; player2: import('@/types').Player | null }> {
+): Promise<{ player1: Player | null; player2: Player | null }> {
   const ids = [duel.player1_id, duel.player2_id].filter(Boolean) as string[];
 
   const { data } = await supabase
@@ -81,7 +76,7 @@ export async function fetchDuelPlayers(
     .select('*')
     .in('id', ids);
 
-  const players = (data ?? []) as import('@/types').Player[];
+  const players = (data ?? []) as Player[];
 
   return {
     player1: players.find((p) => p.id === duel.player1_id) ?? null,

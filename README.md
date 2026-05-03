@@ -1,36 +1,113 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# VibeDuel
 
-## Getting Started
+Real-time multiplayer "vibecoding" arena. Two players race to build the same UI/UX challenge using an AI agent. An AI judge scores both submissions; the winner takes ELO.
 
-First, run the development server:
+**Stack:** Next.js 14 (App Router), TypeScript, Tailwind, Supabase (Postgres + Realtime), Anthropic Claude (Sonnet 4.6) for code generation and judging, Sandpack for sandboxed live preview.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Architecture
+
+```
+┌────────────────────────────┐         ┌──────────────────────────────┐
+│ Browser (anon Supabase key)│         │ Next.js API routes           │
+│  - SELECT players/duels    │         │  (server uses service_role)  │
+│  - INSERT new player       │         │                              │
+│  - Realtime subscriptions  │ ──────▶ │  /api/match  (create/join)   │
+│  - Sandpack live preview   │         │  /api/match/cancel           │
+│  - Code editor + prompts   │         │  /api/match/join (invite)    │
+│                            │         │  /api/duel/[id]/start        │
+│                            │         │  /api/duel/[id]/finalize     │
+│                            │ ──────▶ │  /api/submit                 │
+│                            │         │  /api/generate (streaming)   │
+└────────────────────────────┘         └──────────────────────────────┘
+                                                  │            │
+                                                  ▼            ▼
+                                          Supabase DB    Anthropic API
+                                          (RLS-locked    (codegen + judge)
+                                           writes)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+All state-changing writes (joining a duel, submitting code, advancing status, finalizing scores, updating ELO) go through server routes that use the Supabase `service_role` key. The anon browser client only does `SELECT` and the player-creation `INSERT`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Game flow
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. **Lobby (`/duel`)** — anonymous guest player is created on first visit (UUID stored in `localStorage`). User picks a challenge, clicks Ready, and `/api/match` either joins an open duel or creates a new one.
+2. **Countdown (3-2-1-GO)** — both players load `/duel/[id]`. The first to finish countdown calls `/api/duel/[id]/start`, atomically flipping `status: countdown → active` and setting `started_at`.
+3. **Active phase** — timer is computed from `started_at + timeLimit - now()` so both clients agree on the remaining time. Each player has up to 5 prompt iterations against `/api/generate`, which streams Claude's code response into the editor.
+4. **Submission** — `/api/submit` upserts code into the `submissions` table. When both have submitted (or time runs out), `/api/duel/[id]/finalize` claims the duel atomically, calls Claude as judge, writes scores + ELO, and marks `status: complete`. The other client receives the realtime `complete` event and reconstructs the result.
+5. **Forfeit** — if only one player submits, the submitter wins by forfeit, ELO updates, both clients see results.
 
-## Learn More
+## Local development
 
-To learn more about Next.js, take a look at the following resources:
+### 1. Install
+```bash
+npm install
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 2. Configure environment
+Create `.env.local`:
+```bash
+ANTHROPIC_API_KEY=sk-ant-...
+NEXT_PUBLIC_SUPABASE_URL=https://your-ref.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOi...
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOi...
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### 3. Apply schema to Supabase
+```bash
+cat supabase/schema.sql | supabase db query --linked
+```
 
-## Deploy on Vercel
+### 4. Run
+```bash
+npm run dev
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### 5. Test
+```bash
+npm run test:e2e
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Database schema
+
+- **players**: id, username, avatar_seed, elo (default 1200), wins/losses/draws, created_at
+- **duels**: id, challenge_id, player1_id, player2_id, status (`waiting | countdown | active | judging | complete`), winner_id, invited_only, created_at, started_at, ended_at
+- **submissions**: id, duel_id, player_id, code, score, score_breakdown (JSON), submitted_at — UNIQUE (duel_id, player_id)
+
+**RLS:** anon clients have `SELECT` on all three tables and `INSERT` on `players` only. All other writes require `service_role`.
+
+**Realtime:** `duels` and `submissions` are added to the `supabase_realtime` publication. Both clients subscribe to `postgres_changes` for their duel.
+
+## Race condition handling
+
+Realtime is fast but not instantaneous (a 2-3 second WebSocket handshake on first subscribe), and a single missed event would otherwise hang a player. The lobby and duel room both use **realtime + polling fallback**:
+
+- Lobby polls duel status every 2s while in `searching`, plus re-fetches once subscription confirms `SUBSCRIBED` (catches updates that fired during the handshake window).
+- Duel room polls status every 3s while in `submitted`/`judging`. Player 1 force-triggers finalization 30s after entering `submitted`; player 2 takes over at 60s if P1 has ghosted.
+- `/api/duel/[id]/finalize` is idempotent — both players can call it; only one wins the atomic `status: judging` claim, the rest read the existing result.
+
+## Rate limiting
+
+In-memory token bucket per IP, scoped per route. For multi-instance deploys, swap `src/lib/rateLimit.ts` for Upstash / Vercel KV. Current limits:
+
+| Route | Capacity | Refill |
+|---|---|---|
+| `/api/match` | 5 | 1 / 5s |
+| `/api/match/cancel` | 10 | 1 / 1s |
+| `/api/match/join` | 5 | 1 / 2s |
+| `/api/duel/[id]/start` | 5 | 1 / 2s |
+| `/api/duel/[id]/finalize` | 3 | 1 / 10s |
+| `/api/submit` | 5 | 1 / 2s |
+| `/api/generate` | (size + count caps) | — |
+
+## Deployment
+
+Built for Vercel. The `/duel/[id]` route is a client component dynamically imported with `ssr: false` (it depends on browser-only Supabase client + Sandpack) — both `app/duel/page.tsx` and `app/duel/[id]/page.tsx` follow this pattern.
+
+Set the four env vars (`ANTHROPIC_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) in the Vercel project settings.
+
+## What's not implemented
+
+- Real auth (everything is anonymous-localStorage). Multi-account ELO farming is trivial.
+- Spectator mode / replays.
+- Private invite flow has the column (`invited_only`) but no UI to create/share invite-only duels yet.
+- Per-player ELO history graph.

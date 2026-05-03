@@ -1,9 +1,17 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type TimerProps = {
+  /** Total duration in seconds. Used as a fallback when startedAt is null. */
   readonly initialSeconds: number;
+  /**
+   * Wall-clock anchor for when the duel went active (Date.now() ms or ISO).
+   * If provided, the timer computes remaining seconds from
+   * (startedAt + initialSeconds) - Date.now(), making the value identical
+   * across clients regardless of when each one mounted.
+   */
+  readonly startedAt?: string | number | null;
   readonly onComplete?: () => void;
   readonly isRunning?: boolean;
 };
@@ -14,36 +22,50 @@ function formatTime(totalSeconds: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
+function computeRemaining(
+  initialSeconds: number,
+  startedAt: string | number | null | undefined,
+): number {
+  if (startedAt == null) return initialSeconds;
+  const startMs = typeof startedAt === 'number' ? startedAt : Date.parse(startedAt);
+  if (Number.isNaN(startMs)) return initialSeconds;
+  const elapsed = (Date.now() - startMs) / 1000;
+  return Math.max(0, Math.ceil(initialSeconds - elapsed));
+}
+
 export default function Timer({
   initialSeconds,
+  startedAt,
   onComplete,
   isRunning = false,
 }: TimerProps) {
-  const [seconds, setSeconds] = useState(initialSeconds);
+  const [seconds, setSeconds] = useState(() =>
+    computeRemaining(initialSeconds, startedAt),
+  );
   const completedRef = useRef(false);
 
-  const handleComplete = useCallback(() => {
-    if (completedRef.current) return;
-    completedRef.current = true;
-    onComplete?.();
-  }, [onComplete]);
-
   useEffect(() => {
-    if (!isRunning || seconds <= 0) return;
-
-    const interval = setInterval(() => {
-      setSeconds((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          handleComplete();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
+    if (!isRunning) return;
+    // Tick every 250ms. The displayed value still moves once per second
+    // because we floor to whole seconds, but the higher tick rate keeps the
+    // server-clock sync tight even after backgrounded-tab throttling.
+    const tick = () => {
+      const remaining = computeRemaining(initialSeconds, startedAt);
+      setSeconds(remaining);
+      if (remaining <= 0 && !completedRef.current) {
+        completedRef.current = true;
+        onComplete?.();
+      }
+    };
+    tick();
+    const interval = setInterval(tick, 250);
     return () => clearInterval(interval);
-  }, [isRunning, seconds, handleComplete]);
+  }, [isRunning, initialSeconds, startedAt, onComplete]);
+
+  // Re-arm if the parent recreates with a fresh anchor
+  useEffect(() => {
+    completedRef.current = false;
+  }, [startedAt]);
 
   const isWarning = seconds <= 30 && seconds > 10;
   const isUrgent = seconds <= 10 && seconds > 0;

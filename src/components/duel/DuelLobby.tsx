@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Button from '@/components/ui/Button';
 import ChallengeCard from '@/components/duel/ChallengeCard';
-import { getRandomChallenge } from '@/lib/challenges';
+import { getRandomChallenge, getChallengeById } from '@/lib/challenges';
 import { createClient } from '@/lib/supabase/client';
 import { getOrCreatePlayer } from '@/lib/player';
 import { findOrCreateDuel, cancelDuel } from '@/lib/matchmaking';
@@ -53,34 +53,72 @@ export default function DuelLobby() {
     return () => clearInterval(interval);
   }, [lobbyState]);
 
-  // Subscribe to duel updates when waiting
+  // Subscribe to duel updates AND poll as a safety net.
+  //
+  // Bug C-5: there is a 2-3 second handshake window between calling
+  // .subscribe() and receiving the SUBSCRIBED status from Supabase Realtime.
+  // If P2 joined during that window, P1 missed the UPDATE event and hung on
+  // MATCHMAKING forever. We now (a) re-fetch the current duel state once the
+  // subscription confirms it's live, catching any UPDATE we missed during
+  // handshake, and (b) poll every 2s while searching, so even a dead WebSocket
+  // doesn't strand the player.
   useEffect(() => {
     if (!supabase || !pendingDuel || lobbyState !== 'searching') return;
 
-    const channel = supabase
-      .channel(`duel-lobby:${pendingDuel.id}`)
+    let active = true;
+    const sb = supabase;
+    const duelId = pendingDuel.id;
+
+    const enterFound = () => {
+      if (!active) return;
+      active = false;
+      setLobbyState('found');
+      setTimeout(() => {
+        router.push(`/duel/${duelId}`);
+      }, 1000);
+    };
+
+    const checkStatus = async () => {
+      if (!active) return;
+      const { data } = await sb
+        .from('duels')
+        .select('status')
+        .eq('id', duelId)
+        .single();
+      if (data && (data.status === 'countdown' || data.status === 'active')) {
+        enterFound();
+      }
+    };
+
+    const channel = sb
+      .channel(`duel-lobby:${duelId}`)
       .on(
         'postgres_changes',
         {
           event: 'UPDATE',
           schema: 'public',
           table: 'duels',
-          filter: `id=eq.${pendingDuel.id}`,
+          filter: `id=eq.${duelId}`,
         },
         (payload) => {
           const updated = payload.new as DuelRow;
           if (updated.status === 'countdown' || updated.status === 'active') {
-            setLobbyState('found');
-            setTimeout(() => {
-              router.push(`/duel/${pendingDuel.id}`);
-            }, 1000);
+            enterFound();
           }
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        // Catch any UPDATE that fired between insert and SUBSCRIBED.
+        if (status === 'SUBSCRIBED') checkStatus();
+      });
+
+    // Polling fallback — every 2s, in case realtime fails entirely.
+    const pollInterval = setInterval(checkStatus, 2000);
 
     return () => {
-      supabase.removeChannel(channel);
+      active = false;
+      clearInterval(pollInterval);
+      sb.removeChannel(channel);
     };
   }, [pendingDuel, lobbyState, supabase, router]);
 
@@ -92,6 +130,14 @@ export default function DuelLobby() {
     if (!duel) {
       setLobbyState('selecting');
       return;
+    }
+
+    // If we joined an existing duel, the actual challenge may differ from
+    // what this player selected (matchmaker is challenge-agnostic). Sync the
+    // displayed challenge so the user sees what they'll actually be doing.
+    if (duel.challenge_id !== challenge.id) {
+      const actualChallenge = getChallengeById(duel.challenge_id);
+      if (actualChallenge) setChallenge(actualChallenge);
     }
 
     setPendingDuel(duel);
@@ -107,12 +153,12 @@ export default function DuelLobby() {
   }, [player, challenge, supabase, router]);
 
   const handleCancel = useCallback(async () => {
-    if (supabase && pendingDuel) {
-      await cancelDuel(supabase, pendingDuel.id);
+    if (supabase && pendingDuel && player) {
+      await cancelDuel(supabase, pendingDuel.id, player.id);
       setPendingDuel(null);
     }
     setLobbyState('selecting');
-  }, [pendingDuel, supabase]);
+  }, [pendingDuel, supabase, player]);
 
   const handleNewChallenge = () => {
     setChallenge(getRandomChallenge());

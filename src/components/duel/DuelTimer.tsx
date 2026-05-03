@@ -6,12 +6,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 type DuelTimerProps = {
   readonly seconds: number;
+  readonly startedAt?: string | number | null;
   readonly isRunning?: boolean;
   readonly onComplete?: () => void;
 };
 
 export default function DuelTimer({
   seconds,
+  startedAt,
   isRunning = false,
   onComplete,
 }: DuelTimerProps) {
@@ -32,6 +34,7 @@ export default function DuelTimer({
       </span>
       <Timer
         initialSeconds={seconds}
+        startedAt={startedAt}
         isRunning={isRunning}
         onComplete={handleComplete}
       />

@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS duels (
   player2_id UUID REFERENCES players(id),
   status TEXT DEFAULT 'waiting' CHECK (status IN ('waiting', 'countdown', 'active', 'judging', 'complete')),
   winner_id UUID REFERENCES players(id),
+  invited_only BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT now(),
   started_at TIMESTAMPTZ,
   ended_at TIMESTAMPTZ
@@ -45,11 +46,24 @@ ON submissions(duel_id, player_id);
 ALTER PUBLICATION supabase_realtime ADD TABLE duels;
 ALTER PUBLICATION supabase_realtime ADD TABLE submissions;
 
--- Row Level Security (permissive for MVP — tighten later)
+-- Row Level Security
+-- Anonymous clients can only SELECT (for the leaderboard / duel display) and
+-- INSERT their own player row. ALL other writes (UPDATE, DELETE) must go
+-- through server routes using the service_role key.
 ALTER TABLE players ENABLE ROW LEVEL SECURITY;
 ALTER TABLE duels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE submissions ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow all for players" ON players FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all for duels" ON duels FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all for submissions" ON submissions FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow all for players" ON players;
+DROP POLICY IF EXISTS "Allow all for duels" ON duels;
+DROP POLICY IF EXISTS "Allow all for submissions" ON submissions;
+
+-- players: anyone can SELECT or INSERT (for guest sign-up). UPDATE/DELETE blocked.
+CREATE POLICY "players read" ON players FOR SELECT USING (true);
+CREATE POLICY "players insert" ON players FOR INSERT WITH CHECK (true);
+
+-- duels: anyone can SELECT. Writes only via service_role.
+CREATE POLICY "duels read" ON duels FOR SELECT USING (true);
+
+-- submissions: anyone can SELECT. Writes only via service_role.
+CREATE POLICY "submissions read" ON submissions FOR SELECT USING (true);

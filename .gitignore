@@ -38,3 +38,11 @@ next-env.d.ts
 # test artifacts
 /test-results/
 /tests/screenshots/
+/playwright-report/
+
+# supabase cli
+/supabase/.temp/
+/supabase/.branches/
+
+# scripts (one-off probes)
+/scripts/

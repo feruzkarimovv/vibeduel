@@ -14,7 +14,7 @@ import Badge from '@/components/ui/Badge';
 import { getChallengeById } from '@/lib/challenges';
 import { createClient } from '@/lib/supabase/client';
 import { getOrCreatePlayer } from '@/lib/player';
-import { fetchDuel, fetchDuelPlayers } from '@/lib/matchmaking';
+import { fetchDuel, fetchDuelPlayers, joinDuelById } from '@/lib/matchmaking';
 import { triggerScoring } from '@/lib/scoring';
 import type { ScoringResult } from '@/lib/scoring';
 import ResultsScreen from '@/components/duel/ResultsScreen';
@@ -42,6 +42,7 @@ type DuelPhase =
 
 const MAX_ITERATIONS = 5;
 const PROGRESS_BROADCAST_INTERVAL = 2000;
+const STREAM_ERROR_SENTINEL = '\n\n__VIBEDUEL_STREAM_ERROR__:';
 
 export default function DuelRoom() {
   const params = useParams();
@@ -83,38 +84,26 @@ export default function DuelRoom() {
         return;
       }
 
-      // If this player isn't in the duel yet, try to join as player2
+      // If this player isn't in the duel yet, try to join as player2 via API
+      let resolvedDuel: DuelRow = duelData;
       if (
         duelData.player1_id !== player.id &&
         duelData.player2_id !== player.id
       ) {
         if (duelData.status === 'waiting' && !duelData.player2_id) {
-          const { data: updated } = await sb
-            .from('duels')
-            .update({ player2_id: player.id, status: 'countdown' })
-            .eq('id', duelId)
-            .eq('status', 'waiting')
-            .select()
-            .single();
-
-          if (!updated) {
+          const joined = await joinDuelById(player.id, duelId);
+          if (!joined) {
             setPhase('not_found');
             return;
           }
-          setDuel(updated as DuelRow);
+          resolvedDuel = joined;
         } else {
           // Duel is full or already started and we're not in it
           setPhase('not_found');
           return;
         }
-      } else {
-        setDuel(duelData);
       }
-
-      const resolvedDuel =
-        duelData.player1_id === player.id || duelData.player2_id === player.id
-          ? duelData
-          : ((await fetchDuel(sb, duelId)) as DuelRow);
+      setDuel(resolvedDuel);
 
       isPlayer1Ref.current = resolvedDuel.player1_id === player.id;
 
@@ -149,7 +138,7 @@ export default function DuelRoom() {
 
   // ---------- SCORING ----------
   const doScoring = useCallback(async () => {
-    if (!supabase || !challenge) return;
+    if (!currentPlayer) return;
     if (scoringTriggeredRef.current) {
       console.log('[VibeDuel] Scoring already triggered, skipping');
       return;
@@ -158,73 +147,80 @@ export default function DuelRoom() {
     setPhase('judging');
     console.log('[VibeDuel] Starting AI scoring...');
     try {
-      const result = await triggerScoring(supabase, duelId, challenge);
+      const result = await triggerScoring(duelId, currentPlayer.id);
       console.log('[VibeDuel] Scoring complete:', result ? 'got result' : 'null result');
       if (result) {
         setScoringResult(result);
       } else {
-        // Null result — mark complete to avoid hanging
         console.error('[VibeDuel] triggerScoring returned null');
         setPhase('complete');
       }
     } catch (err) {
       console.error('[VibeDuel] Scoring failed:', err);
-      await supabase
-        .from('duels')
-        .update({ status: 'complete', ended_at: new Date().toISOString() })
-        .eq('id', duelId);
       setPhase('complete');
     }
-  }, [supabase, challenge, duelId]);
+  }, [duelId, currentPlayer]);
 
   // ---------- POLL: ensure scoring proceeds even if realtime fails ----------
+  // Both players run this. P1 is the primary scoring trigger (30s); P2 takes
+  // over after 60s if P1 has ghosted. doScoring uses scoringTriggeredRef as a
+  // per-client lock and atomically claims the duel via status='judging'.
   useEffect(() => {
     if (!supabase || (phase !== 'submitted' && phase !== 'judging')) return;
 
     let active = true;
 
+    const reconstructFromCompletedDuel = async () => {
+      const { data: d } = await supabase
+        .from('duels')
+        .select('status, winner_id, player1_id, player2_id')
+        .eq('id', duelId)
+        .single();
+      if (!active || !d || d.status !== 'complete') return false;
+
+      const { data: subs } = await supabase
+        .from('submissions')
+        .select('*')
+        .eq('duel_id', duelId);
+      if (!active || !subs) {
+        setPhase('complete');
+        return true;
+      }
+
+      const sub1 = subs.find((s) => s.player_id === d.player1_id) ?? null;
+      const sub2 = subs.find((s) => s.player_id === d.player2_id) ?? null;
+      const empty = {
+        functionality: 0,
+        visual_design: 0,
+        creativity: 0,
+        code_quality: 0,
+        completeness: 0,
+        total: 0,
+        feedback: 'No submission.',
+      };
+      const winner: 'player1' | 'player2' | 'draw' =
+        d.winner_id === d.player1_id
+          ? 'player1'
+          : d.winner_id === d.player2_id
+            ? 'player2'
+            : 'draw';
+      setScoringResult({
+        player1: sub1?.score_breakdown ?? empty,
+        player2: sub2?.score_breakdown ?? empty,
+        winner,
+        commentary: '',
+      } as ScoringResult);
+      setPhase('complete');
+      return true;
+    };
+
     const poll = async () => {
       if (!active || scoringResult) return;
 
-      // Check current duel status in DB
-      const { data: d } = await supabase
-        .from('duels')
-        .select('status, winner_id')
-        .eq('id', duelId)
-        .single();
+      // Already done — sync from DB.
+      if (await reconstructFromCompletedDuel()) return;
 
-      if (!active || !d) return;
-
-      // If duel is already complete in DB, fetch scores
-      if (d.status === 'complete') {
-        const { data: subs } = await supabase
-          .from('submissions')
-          .select('*')
-          .eq('duel_id', duelId)
-          .order('submitted_at', { ascending: true });
-
-        if (subs && subs.length >= 1 && subs[0].score_breakdown) {
-          setScoringResult({
-            player1: subs[0].score_breakdown,
-            player2: subs[1]?.score_breakdown ?? {
-              functionality: 0, visual_design: 0, creativity: 0,
-              code_quality: 0, completeness: 0, total: 0,
-              feedback: 'No submission.',
-            },
-            winner:
-              d.winner_id === subs[0].player_id
-                ? 'player1'
-                : d.winner_id === subs[1]?.player_id
-                  ? 'player2'
-                  : 'draw',
-            commentary: '',
-          } as ScoringResult);
-        }
-        setPhase('complete');
-        return;
-      }
-
-      // Player1: if both submissions exist, trigger scoring now
+      // P1 path: if both submissions exist, finalize immediately.
       if (isPlayer1Ref.current && !scoringTriggeredRef.current) {
         const { data: subs } = await supabase
           .from('submissions')
@@ -233,38 +229,30 @@ export default function DuelRoom() {
 
         if (subs && subs.length >= 2) {
           console.log('[VibeDuel:poll] Both submitted — triggering scoring');
-          await supabase
-            .from('duels')
-            .update({ status: 'judging' })
-            .eq('id', duelId);
           await doScoring();
         }
       }
     };
 
-    // Poll immediately then every 3 seconds
     poll();
     const interval = setInterval(poll, 3000);
 
-    // Safety: Player1 forces scoring after 30s regardless (handles opponent disconnect)
-    let forceTimer: ReturnType<typeof setTimeout> | undefined;
-    if (isPlayer1Ref.current) {
-      forceTimer = setTimeout(async () => {
-        if (active && !scoringTriggeredRef.current && supabase) {
-          console.log('[VibeDuel:poll] Force-triggering scoring after timeout');
-          await supabase
-            .from('duels')
-            .update({ status: 'judging' })
-            .eq('id', duelId);
-          await doScoring();
-        }
-      }, 30000);
-    }
+    // Safety net: P1 force-triggers after 30s, P2 after 60s. The /finalize
+    // route is idempotent, so a duplicate call from both players is harmless.
+    const forceDelay = isPlayer1Ref.current ? 30000 : 60000;
+    const forceTimer = setTimeout(async () => {
+      if (!active || scoringTriggeredRef.current) return;
+      if (await reconstructFromCompletedDuel()) return;
+      console.log(
+        `[VibeDuel:poll] Force-triggering scoring after ${forceDelay}ms`,
+      );
+      await doScoring();
+    }, forceDelay);
 
     return () => {
       active = false;
       clearInterval(interval);
-      if (forceTimer) clearTimeout(forceTimer);
+      clearTimeout(forceTimer);
     };
   }, [phase, supabase, duelId, doScoring, scoringResult]);
 
@@ -312,22 +300,32 @@ export default function DuelRoom() {
 
           if (updated.status === 'complete') {
             setPhase('complete');
-            // Player2 fetches the scores if they don't have them yet
+            // The other player needs the scores — fetch from DB and align by
+            // duel.player1_id / player2_id (NOT submission order).
             if (!scoringTriggeredRef.current) {
               const { data: subs } = await supabase
                 .from('submissions')
                 .select('*')
-                .eq('duel_id', duelId)
-                .order('submitted_at', { ascending: true });
-              if (subs && subs.length >= 2) {
-                setScoringResult({
-                  player1: subs[0].score_breakdown ?? { total: subs[0].score ?? 0, feedback: '' },
-                  player2: subs[1].score_breakdown ?? { total: subs[1].score ?? 0, feedback: '' },
-                  winner: updated.winner_id === subs[0].player_id ? 'player1'
-                    : updated.winner_id === subs[1].player_id ? 'player2' : 'draw',
-                  commentary: '',
-                } as ScoringResult);
-              }
+                .eq('duel_id', duelId);
+              const empty = {
+                functionality: 0, visual_design: 0, creativity: 0,
+                code_quality: 0, completeness: 0, total: 0,
+                feedback: 'No submission.',
+              };
+              const sub1 = subs?.find((s) => s.player_id === updated.player1_id) ?? null;
+              const sub2 = subs?.find((s) => s.player_id === updated.player2_id) ?? null;
+              const winner: 'player1' | 'player2' | 'draw' =
+                updated.winner_id === updated.player1_id
+                  ? 'player1'
+                  : updated.winner_id === updated.player2_id
+                    ? 'player2'
+                    : 'draw';
+              setScoringResult({
+                player1: sub1?.score_breakdown ?? empty,
+                player2: sub2?.score_breakdown ?? empty,
+                winner,
+                commentary: '',
+              } as ScoringResult);
             }
           }
         },
@@ -413,24 +411,37 @@ export default function DuelRoom() {
 
   // ---------- HANDLERS ----------
   const handleCountdownComplete = useCallback(async () => {
-    if (isPlayer1Ref.current && duel && supabase) {
-      await supabase
-        .from('duels')
-        .update({ status: 'active', started_at: new Date().toISOString() })
-        .eq('id', duelId);
+    // Either player can drive the transition; the server endpoint is
+    // idempotent and only flips countdown→active. We still let player1 be the
+    // primary so the server clock anchor (started_at) is set predictably.
+    if (currentPlayer) {
+      try {
+        await fetch(`/api/duel/${duelId}/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ player_id: currentPlayer.id }),
+        });
+      } catch (err) {
+        console.error('start endpoint failed:', err);
+      }
     }
     setPhase('active');
-  }, [duel, duelId, supabase]);
+  }, [duelId, currentPlayer]);
 
   const handleGenerate = useCallback(
     async (prompt: string) => {
       if (!challenge || iterationCount >= MAX_ITERATIONS || isGenerating) return;
 
       setIsGenerating(true);
-      setIterationCount((prev) => prev + 1);
 
       const isRefining = iterationCount > 0 && code.trim().length > 0;
+      const codeBeforeGeneration = code;
       if (!isRefining) setCode('');
+
+      // Track whether we successfully consumed any code from the stream.
+      // We only burn an iteration if the user actually got something usable —
+      // pure errors (auth, network, validation) don't count.
+      let producedAnyCode = false;
 
       try {
         const response = await fetch('/api/generate', {
@@ -439,7 +450,7 @@ export default function DuelRoom() {
           body: JSON.stringify({
             prompt,
             challenge,
-            existingCode: isRefining ? code : undefined,
+            existingCode: isRefining ? codeBeforeGeneration : undefined,
           }),
         });
 
@@ -447,54 +458,89 @@ export default function DuelRoom() {
           const errorData = await response.json().catch(() => null);
           const msg = errorData?.error ?? `API error ${response.status}`;
           setCode(`// Error: ${msg}\n// Please try again.`);
-          setIsGenerating(false);
+          if (isRefining) setCode(codeBeforeGeneration);
           return;
         }
 
         const reader = response.body?.getReader();
         if (!reader) {
           setCode('// Error: No response stream');
-          setIsGenerating(false);
+          if (isRefining) setCode(codeBeforeGeneration);
           return;
         }
 
         const decoder = new TextDecoder();
         let accumulated = '';
+        let hadStreamError = false;
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           accumulated += decoder.decode(value, { stream: true });
+
+          // Detect mid-stream error sentinel from the server (C-1 fix path)
+          const errIdx = accumulated.indexOf(STREAM_ERROR_SENTINEL);
+          if (errIdx !== -1) {
+            const errMsg = accumulated.slice(
+              errIdx + STREAM_ERROR_SENTINEL.length,
+            );
+            const usefulSoFar = accumulated.slice(0, errIdx);
+            hadStreamError = true;
+            if (usefulSoFar.length > 100) {
+              // We got partial code before the error — keep it but warn.
+              setCode(
+                `${usefulSoFar}\n\n// Stream interrupted: ${errMsg.trim()}`,
+              );
+              producedAnyCode = true;
+            } else {
+              setCode(`// Error: ${errMsg.trim()}\n// Please try again.`);
+              if (isRefining) setCode(codeBeforeGeneration);
+            }
+            break;
+          }
+
           setCode(accumulated);
+        }
+
+        if (!hadStreamError && accumulated.length > 100) {
+          producedAnyCode = true;
+        } else if (!hadStreamError && accumulated.length <= 100) {
+          // Empty/tiny stream — treat as failure
+          setCode('// Error: Empty response from AI\n// Please try again.');
+          if (isRefining) setCode(codeBeforeGeneration);
         }
       } catch (error) {
         const message =
           error instanceof Error ? error.message : 'Unknown error';
         setCode(`// Error: ${message}\n// Please try again.`);
+        if (isRefining) setCode(codeBeforeGeneration);
       } finally {
         setIsGenerating(false);
+        if (producedAnyCode) {
+          setIterationCount((prev) => prev + 1);
+        }
       }
     },
     [challenge, iterationCount, isGenerating, code],
   );
 
   const handleSubmit = useCallback(async () => {
-    if (!supabase || phase !== 'active' || hasSubmittedRef.current) return;
+    if (!supabase || !currentPlayer || phase !== 'active' || hasSubmittedRef.current) return;
     hasSubmittedRef.current = true;
     setPhase('submitted');
 
-    // Upsert submission
-    await supabase.from('submissions').upsert(
-      {
+    // Submit code via server route (server validates player + duel state).
+    await fetch('/api/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         duel_id: duelId,
-        player_id: currentPlayer!.id,
+        player_id: currentPlayer.id,
         code,
-        submitted_at: new Date().toISOString(),
-      },
-      { onConflict: 'duel_id,player_id' },
-    );
+      }),
+    });
 
-    // Check if opponent already submitted
+    // Check if opponent already submitted via SELECT (which is allowed by RLS).
     const { data: allSubs } = await supabase
       .from('submissions')
       .select('id')
@@ -502,59 +548,46 @@ export default function DuelRoom() {
 
     const bothSubmitted = allSubs && allSubs.length >= 2;
     const hasNoOpponent = !duel?.player2_id;
-
-    // Trigger scoring if: both submitted, OR solo (no opponent)
     const shouldScore = bothSubmitted || hasNoOpponent;
 
-    if (shouldScore && isPlayer1Ref.current) {
-      await supabase
-        .from('duels')
-        .update({ status: 'judging' })
-        .eq('id', duelId);
-      await doScoring();
-    } else if (shouldScore && !isPlayer1Ref.current) {
-      // Player2 submitted last — set judging, player1's realtime handler will score
-      await supabase
-        .from('duels')
-        .update({ status: 'judging' })
-        .eq('id', duelId);
-      setPhase('judging');
+    if (shouldScore) {
+      // Either player can call finalize; the route is idempotent.
+      // Prefer P1 to keep determinism; P2 sets local 'judging' and lets the
+      // realtime listener pick up the completed status.
+      if (isPlayer1Ref.current) {
+        await doScoring();
+      } else {
+        setPhase('judging');
+      }
     }
     // Otherwise: waiting for opponent's submission — stay at 'submitted'
   }, [phase, supabase, duelId, currentPlayer, code, doScoring, duel]);
 
   const handleTimeUp = useCallback(async () => {
-    if (!supabase || hasSubmittedRef.current) return;
+    if (hasSubmittedRef.current) return;
     hasSubmittedRef.current = true;
 
-    // Auto-submit whatever code exists
     if (currentPlayer) {
-      await supabase.from('submissions').upsert(
-        {
+      await fetch('/api/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           duel_id: duelId,
           player_id: currentPlayer.id,
           code,
-          submitted_at: new Date().toISOString(),
-        },
-        { onConflict: 'duel_id,player_id' },
-      );
+        }),
+      });
     }
 
     setPhase('timesup');
     setTimeout(async () => {
-      if (!supabase) return;
-      // Player1 (or solo) triggers scoring
       if (isPlayer1Ref.current || !duel?.player2_id) {
-        await supabase
-          .from('duels')
-          .update({ status: 'judging' })
-          .eq('id', duelId);
         await doScoring();
       } else {
         setPhase('judging');
       }
     }, 1600);
-  }, [currentPlayer, supabase, duelId, code, doScoring, duel]);
+  }, [currentPlayer, duelId, code, doScoring, duel]);
 
   const handleClearRestart = useCallback(() => {
     if (iterationCount >= MAX_ITERATIONS || isGenerating) return;
@@ -671,6 +704,7 @@ export default function DuelRoom() {
 
         <DuelTimer
           seconds={challenge.timeLimit}
+          startedAt={duel?.started_at ?? null}
           isRunning={isActive}
           onComplete={handleTimeUp}
         />

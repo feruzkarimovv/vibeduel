@@ -101,6 +101,11 @@ function sanitizeCode(code: string): string {
   // Remove "use client" directives
   cleaned = cleaned.replace(/['"]use client['"];?\n?/g, '');
 
+  // Strip an accidental sentinel line our /api/generate emits if mid-stream
+  // failed (see route.ts ERROR_SENTINEL).
+  const sentinelIdx = cleaned.indexOf('__VIBEDUEL_STREAM_ERROR__');
+  if (sentinelIdx !== -1) cleaned = cleaned.slice(0, sentinelIdx);
+
   // Ensure React import exists
   if (!cleaned.includes('import React') && !cleaned.includes("from 'react'")) {
     cleaned =
@@ -108,11 +113,22 @@ function sanitizeCode(code: string): string {
       cleaned;
   }
 
-  // Ensure there's a default export
+  // Ensure there's a default export. Prefer 'App' if present (the system
+  // prompt asks for it). Otherwise pick the LAST top-level component-ish
+  // declaration — the previous version picked the FIRST, which broke when the
+  // model defined helper functions before the main component.
   if (!cleaned.includes('export default')) {
-    const match = cleaned.match(/(?:function|const)\s+(\w+)\s*[=(]/);
-    if (match) {
-      cleaned += `\nexport default ${match[1]};`;
+    const componentNames: string[] = [];
+    const re = /(?:^|\n)\s*(?:function|const)\s+([A-Z]\w*)\s*[=(]/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(cleaned)) !== null) componentNames.push(m[1]);
+    const choice =
+      componentNames.find((n) => n === 'App') ??
+      componentNames[componentNames.length - 1] ??
+      // Final fallback: any function/const at all
+      cleaned.match(/(?:function|const)\s+(\w+)\s*[=(]/)?.[1];
+    if (choice) {
+      cleaned += `\nexport default ${choice};`;
     }
   }
 
