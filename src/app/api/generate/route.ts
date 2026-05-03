@@ -61,10 +61,10 @@ export async function POST(req: Request) {
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  const systemPrompt = `You are a vibecoding AI in a competitive coding arena called VibeDuel.
-You must generate a SINGLE self-contained React component that runs in a sandboxed preview.
+  const isRefine =
+    typeof existingCode === 'string' && existingCode.trim().length > 0;
 
-CRITICAL RULES — FOLLOW ALL OF THESE EXACTLY:
+  const baseRules = `CRITICAL RULES — FOLLOW ALL OF THESE EXACTLY:
 - Start the code with: import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 - The component MUST be named App and end with: export default App;
 - Output ONLY the code. No markdown, no explanation, no code fences, no backticks.
@@ -74,18 +74,40 @@ CRITICAL RULES — FOLLOW ALL OF THESE EXACTLY:
 - The code must work in an isolated sandbox with ZERO network access.
 - Do NOT use import statements except for React at the top.
 - You can use React hooks: useState, useEffect, useRef, useMemo, useCallback.
-- Make it visually impressive — users are judged on functionality AND visual polish.
-- Use a dark color scheme with modern aesthetics (dark backgrounds like #0a0a0f, accent colors, subtle gradients).
-- The component should be fully interactive and working.
 
 The challenge is: ${challenge.title}
 Description: ${typeof challenge.description === 'string' ? challenge.description : ''}
 Scoring criteria: ${Array.isArray(challenge.criteria) ? challenge.criteria.join(', ') : ''}`;
 
-  const userMessage =
-    typeof existingCode === 'string' && existingCode.trim()
-      ? `Here is my current code. Improve it based on this feedback: ${prompt}\n\nCurrent code:\n${existingCode}`
-      : prompt;
+  const systemPrompt = isRefine
+    ? `You are editing an existing React component for a vibecoding arena called VibeDuel.
+
+YOUR JOB: apply the user's requested change to the existing component, and ONLY that change. You are NOT writing a new component. You are NOT free to redesign anything the user did not ask about.
+
+MANDATORY EDITING RULES — these override all other instincts:
+- Output the COMPLETE updated component (the entire file, top to bottom) with ONLY the user's requested change applied.
+- PRESERVE the existing structure, variable names, state shape, mock data, layout, and visual styling. Do not rename things. Do not "improve" code the user did not mention. Do not refactor.
+- If the user asks for a small change (e.g. "make columns wider", "add a button"), touch only the lines needed for that change. Everything else must come back identical.
+- Treat the existing code as the source of truth. Treat the user's prompt as a surgical instruction.
+
+${baseRules}`
+    : `You are a vibecoding AI in a competitive coding arena called VibeDuel.
+You must generate a SINGLE self-contained React component that runs in a sandboxed preview.
+
+${baseRules}
+- Make it visually impressive — users are judged on functionality AND visual polish.
+- Use a dark color scheme with modern aesthetics (dark backgrounds like #0a0a0f, accent colors, subtle gradients).
+- The component should be fully interactive and working.`;
+
+  const userMessage = isRefine
+    ? `Apply this change to my existing component, and ONLY this change. Preserve everything else exactly as it is.
+
+Change requested:
+${prompt}
+
+Existing component (return the full file with the change applied — do NOT rewrite from scratch, do NOT change anything I did not ask about):
+${existingCode}`
+    : prompt;
 
   // Open the stream synchronously so any auth / quota errors fail BEFORE we
   // commit to a 200 response. This is the C-1 fix: the original code returned
