@@ -96,7 +96,7 @@ Scoring criteria: ${Array.isArray(challenge.criteria) ? challenge.criteria.join(
   try {
     stream = await client.messages.stream({
       model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
+      max_tokens: 8192,
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
     });
@@ -118,6 +118,19 @@ Scoring criteria: ${Array.isArray(challenge.criteria) ? challenge.criteria.join(
             event.delta.type === 'text_delta'
           ) {
             controller.enqueue(encoder.encode(event.delta.text));
+          } else if (
+            event.type === 'message_delta' &&
+            event.delta.stop_reason === 'max_tokens'
+          ) {
+            // The model ran out of output budget. The text we already streamed
+            // is almost certainly cut mid-statement, so feeding it to Sandpack
+            // produces a SyntaxError. Tell the client so it can warn and not
+            // burn an iteration on a doomed render.
+            controller.enqueue(
+              encoder.encode(
+                `${ERROR_SENTINEL}max_tokens_truncation`,
+              ),
+            );
           }
         }
         controller.close();

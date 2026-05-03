@@ -65,6 +65,10 @@ export default function DuelRoom() {
   const scoringTriggeredRef = useRef(false);
   const progressIntervalRef = useRef<ReturnType<typeof setInterval>>();
   const hasSubmittedRef = useRef(false);
+  // Live snapshot of code/iteration for the progress broadcaster — avoids
+  // re-running the effect on every keystroke.
+  const codeRef = useRef('');
+  const iterationRef = useRef(0);
 
   // ---------- INIT: load player, duel, challenge ----------
   useEffect(() => {
@@ -337,57 +341,61 @@ export default function DuelRoom() {
     };
   }, [duel, duelId, supabase, phase, currentPlayer, opponent, challenge, doScoring]);
 
-  // ---------- REALTIME: broadcast progress ----------
+  // Keep refs in sync so the broadcaster can read latest values without the
+  // effect re-mounting on every keystroke.
+  useEffect(() => {
+    codeRef.current = code;
+  }, [code]);
+  useEffect(() => {
+    iterationRef.current = iterationCount;
+  }, [iterationCount]);
+
+  // ---------- REALTIME: subscribe + broadcast progress on one channel ----------
+  // Single channel subscribed once per (currentPlayer, duelId, phase) triplet.
+  // Listens for opponent updates and broadcasts our own progress on a timer.
+  // Reads latest code/iteration via refs to avoid re-subscribing each keystroke.
   useEffect(() => {
     if (!supabase || !currentPlayer || phase !== 'active') return;
 
-    const channel = supabase.channel(`progress:${duelId}`);
-
-    // Listen for opponent progress
-    channel
+    const channel = supabase
+      .channel(`progress:${duelId}`)
       .on('broadcast', { event: 'progress' }, ({ payload }) => {
         if (payload.playerId !== currentPlayer.id) {
           setOpponentProgress(payload as OpponentProgress);
         }
-      })
-      .subscribe();
+      });
+
+    let interval: ReturnType<typeof setInterval> | undefined;
+    channel.subscribe((status) => {
+      if (status !== 'SUBSCRIBED' || interval) return;
+      interval = setInterval(() => {
+        const liveCode = codeRef.current;
+        channel.send({
+          type: 'broadcast',
+          event: 'progress',
+          payload: {
+            playerId: currentPlayer.id,
+            lineCount: liveCode.split('\n').length,
+            charCount: liveCode.length,
+            iterationCount: iterationRef.current,
+            hasPreview: liveCode.length > 100,
+            status: hasSubmittedRef.current
+              ? 'submitted'
+              : liveCode.length > 0
+                ? 'coding'
+                : 'idle',
+          },
+        });
+      }, PROGRESS_BROADCAST_INTERVAL);
+      progressIntervalRef.current = interval;
+    });
 
     return () => {
+      if (interval) clearInterval(interval);
+      progressIntervalRef.current = undefined;
       supabase.removeChannel(channel);
     };
   }, [currentPlayer, duelId, supabase, phase]);
-
-  // Broadcast own progress every 2s
-  useEffect(() => {
-    if (!supabase || phase !== 'active' || !currentPlayer) return;
-
-    const broadcast = () => {
-      const channel = supabase.channel(`progress:${duelId}`);
-      channel.send({
-        type: 'broadcast',
-        event: 'progress',
-        payload: {
-          playerId: currentPlayer.id,
-          lineCount: code.split('\n').length,
-          charCount: code.length,
-          iterationCount,
-          hasPreview: code.length > 100,
-          status: hasSubmittedRef.current
-            ? 'submitted'
-            : code.length > 0
-              ? 'coding'
-              : 'idle',
-        },
-      });
-    };
-
-    progressIntervalRef.current = setInterval(
-      broadcast,
-      PROGRESS_BROADCAST_INTERVAL,
-    );
-
-    return () => clearInterval(progressIntervalRef.current);
-  }, [phase, currentPlayer, duelId, supabase, code, iterationCount]);
 
   // ---------- PRESENCE: track online players ----------
   useEffect(() => {
@@ -486,6 +494,22 @@ export default function DuelRoom() {
             );
             const usefulSoFar = accumulated.slice(0, errIdx);
             hadStreamError = true;
+
+            // max_tokens truncation — partial code will SyntaxError in
+            // Sandpack. Don't burn the iteration; show a warning and keep the
+            // pre-attempt code so the user can retry with a simpler prompt.
+            if (errMsg.trim() === 'max_tokens_truncation') {
+              const warning =
+                '// ⚠ Generation hit token limit and was cut off.\n// Try a simpler prompt or break it into steps. Iteration was NOT consumed.';
+              if (isRefining) {
+                setCode(`${warning}\n\n${codeBeforeGeneration}`);
+              } else {
+                setCode(`${warning}\n\n${usefulSoFar}`);
+              }
+              // producedAnyCode stays false → no iteration spent
+              break;
+            }
+
             if (usefulSoFar.length > 100) {
               // We got partial code before the error — keep it but warn.
               setCode(

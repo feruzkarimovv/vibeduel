@@ -106,6 +106,18 @@ function sanitizeCode(code: string): string {
   const sentinelIdx = cleaned.indexOf('__VIBEDUEL_STREAM_ERROR__');
   if (sentinelIdx !== -1) cleaned = cleaned.slice(0, sentinelIdx);
 
+  // Strip Tailwind/className attributes — Sandpack's `react` template has no
+  // Tailwind, so any className= is dead code at best, broken layout at worst.
+  // The system prompt forbids them but Sonnet ignores it ~30% of the time.
+  // Handles double quotes, single quotes, and JSX expression form. The JSX
+  // expression branch is non-greedy on `{...}` so it stops at the first close
+  // brace — rare nested-template cases will be left intact (better than
+  // mangling them).
+  cleaned = cleaned.replace(
+    /\s+className\s*=\s*(?:"[^"]*"|'[^']*'|\{[^{}]*\})/g,
+    '',
+  );
+
   // Ensure React import exists
   if (!cleaned.includes('import React') && !cleaned.includes("from 'react'")) {
     cleaned =
@@ -113,19 +125,28 @@ function sanitizeCode(code: string): string {
       cleaned;
   }
 
-  // Ensure there's a default export. Prefer 'App' if present (the system
-  // prompt asks for it). Otherwise pick the LAST top-level component-ish
-  // declaration — the previous version picked the FIRST, which broke when the
-  // model defined helper functions before the main component.
+  // Ensure there's a default export. Prefer 'App' (system prompt asks for it).
+  // Otherwise pick the component with the largest body — the "main" component
+  // is almost always the longest one. Falls back to first declaration.
   if (!cleaned.includes('export default')) {
-    const componentNames: string[] = [];
-    const re = /(?:^|\n)\s*(?:function|const)\s+([A-Z]\w*)\s*[=(]/g;
+    const re = /(?:^|\n)[ \t]*(?:function|const)\s+([A-Z]\w*)\b/g;
+    const positions: { name: string; idx: number }[] = [];
     let m: RegExpExecArray | null;
-    while ((m = re.exec(cleaned)) !== null) componentNames.push(m[1]);
+    while ((m = re.exec(cleaned)) !== null) {
+      positions.push({ name: m[1], idx: m.index });
+    }
+    const candidates = positions.map((p, i) => ({
+      name: p.name,
+      size:
+        i + 1 < positions.length
+          ? positions[i + 1].idx - p.idx
+          : cleaned.length - p.idx,
+    }));
+    const appHit = candidates.find((c) => c.name === 'App');
+    const biggest = candidates.slice().sort((a, b) => b.size - a.size)[0];
     const choice =
-      componentNames.find((n) => n === 'App') ??
-      componentNames[componentNames.length - 1] ??
-      // Final fallback: any function/const at all
+      appHit?.name ??
+      biggest?.name ??
       cleaned.match(/(?:function|const)\s+(\w+)\s*[=(]/)?.[1];
     if (choice) {
       cleaned += `\nexport default ${choice};`;
@@ -209,7 +230,6 @@ export default function LivePreview({
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
         <style dangerouslySetInnerHTML={{ __html: SANDPACK_HEIGHT_CSS }} />
         <SandpackProvider
-          key={displayCode}
           template="react"
           theme="dark"
           files={{

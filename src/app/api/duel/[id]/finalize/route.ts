@@ -90,7 +90,7 @@ export async function POST(
     return NextResponse.json(await reconstruct(sb, latest));
   }
 
-  const { data: submissions } = await sb
+  let { data: submissions } = await sb
     .from('submissions')
     .select('*')
     .eq('duel_id', params.id);
@@ -99,6 +99,21 @@ export async function POST(
       { error: 'no submissions to finalize' },
       { status: 400 },
     );
+  }
+
+  // If we only see one submission, the opponent's POST may simply be in
+  // flight — handleSubmit on both sides can race finalize. Wait briefly and
+  // re-query before declaring forfeit, otherwise a fast-clicking P1 can
+  // steal a 100/0 win from a P2 whose submit lands ~500ms later.
+  if (submissions.length === 1 && duel.player2_id) {
+    await new Promise((r) => setTimeout(r, 2500));
+    const { data: again } = await sb
+      .from('submissions')
+      .select('*')
+      .eq('duel_id', params.id);
+    if (again && again.length >= 2) {
+      submissions = again;
+    }
   }
 
   // Forfeit branch
@@ -192,7 +207,7 @@ ${sub2.code || '// No code submitted'}`;
   try {
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
+      max_tokens: 2048,
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
     });
