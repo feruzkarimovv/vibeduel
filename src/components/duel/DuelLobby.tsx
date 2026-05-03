@@ -31,6 +31,7 @@ export default function DuelLobby() {
   const [pendingDuel, setPendingDuel] = useState<DuelRow | null>(null);
   const [dots, setDots] = useState('');
   const [copied, setCopied] = useState(false);
+  const [isPrivate, setIsPrivate] = useState(false);
 
   // Init player + challenge
   useEffect(() => {
@@ -122,35 +123,39 @@ export default function DuelLobby() {
     };
   }, [pendingDuel, lobbyState, supabase, router]);
 
-  const handleReady = useCallback(async () => {
-    if (!supabase || !player || !challenge) return;
-    setLobbyState('searching');
+  const handleReady = useCallback(
+    async (opts?: { private?: boolean }) => {
+      if (!supabase || !player || !challenge) return;
+      setIsPrivate(!!opts?.private);
+      setLobbyState('searching');
 
-    const duel = await findOrCreateDuel(supabase, player.id, challenge.id);
-    if (!duel) {
-      setLobbyState('selecting');
-      return;
-    }
+      const duel = await findOrCreateDuel(supabase, player.id, challenge.id, {
+        private: opts?.private,
+      });
+      if (!duel) {
+        setLobbyState('selecting');
+        return;
+      }
 
-    // If we joined an existing duel, the actual challenge may differ from
-    // what this player selected (matchmaker is challenge-agnostic). Sync the
-    // displayed challenge so the user sees what they'll actually be doing.
-    if (duel.challenge_id !== challenge.id) {
-      const actualChallenge = getChallengeById(duel.challenge_id);
-      if (actualChallenge) setChallenge(actualChallenge);
-    }
+      // If we joined an existing public duel, the actual challenge may differ.
+      if (duel.challenge_id !== challenge.id) {
+        const actualChallenge = getChallengeById(duel.challenge_id);
+        if (actualChallenge) setChallenge(actualChallenge);
+      }
 
-    setPendingDuel(duel);
+      setPendingDuel(duel);
 
-    // If we joined an existing duel (status is countdown), go directly
-    if (duel.status === 'countdown') {
-      setLobbyState('found');
-      setTimeout(() => {
-        router.push(`/duel/${duel.id}`);
-      }, 1000);
-    }
-    // Otherwise we created a new duel and are waiting — realtime subscription handles it
-  }, [player, challenge, supabase, router]);
+      // If we joined an existing duel (status is countdown), go directly
+      if (duel.status === 'countdown') {
+        setLobbyState('found');
+        setTimeout(() => {
+          router.push(`/duel/${duel.id}`);
+        }, 1000);
+      }
+      // Otherwise we created a new duel and are waiting — realtime handles it
+    },
+    [player, challenge, supabase, router],
+  );
 
   const handleCancel = useCallback(async () => {
     if (supabase && pendingDuel && player) {
@@ -227,7 +232,7 @@ export default function DuelLobby() {
           )}
           {lobbyState === 'searching' && (
             <h1 className="text-2xl font-black text-neon-green uppercase tracking-tight">
-              MATCHMAKING{dots}
+              {isPrivate ? `WAITING FOR INVITEE${dots}` : `MATCHMAKING${dots}`}
             </h1>
           )}
           {lobbyState === 'found' && (
@@ -244,8 +249,15 @@ export default function DuelLobby() {
         <div className="space-y-3">
           {lobbyState === 'selecting' && (
             <>
-              <Button className="w-full" onClick={handleReady}>
+              <Button className="w-full" onClick={() => handleReady()}>
                 READY — FIND OPPONENT
+              </Button>
+              <Button
+                variant="secondary"
+                className="w-full"
+                onClick={() => handleReady({ private: true })}
+              >
+                CREATE PRIVATE DUEL
               </Button>
               <Button
                 variant="ghost"
@@ -268,30 +280,53 @@ export default function DuelLobby() {
               </div>
 
               <p className="text-xs text-zinc-600 font-mono uppercase tracking-wider">
-                Scanning for opponents...
+                {isPrivate
+                  ? 'Waiting for your invitee to join'
+                  : 'Scanning for opponents...'}
               </p>
 
-              {/* Share link */}
+              {/* Invite link — prominent for private duels */}
               {pendingDuel && (
-                <button
-                  onClick={handleCopyLink}
-                  className="text-[11px] text-neon-green/70 hover:text-neon-green transition-colors flex items-center gap-1.5 font-mono"
-                >
-                  <svg
-                    className="w-3 h-3"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
-                    />
-                  </svg>
-                  {copied ? 'LINK COPIED' : 'COPY INVITE LINK'}
-                </button>
+                <div className="w-full">
+                  {isPrivate ? (
+                    <div className="border border-neon-magenta/40 bg-arena-dark p-3 space-y-2">
+                      <p className="text-[10px] text-zinc-600 font-mono uppercase tracking-[0.2em]">
+                        Send this link to your opponent
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 text-[10px] text-neon-magenta font-mono break-all">
+                          {`${typeof window === 'undefined' ? '' : window.location.origin}/duel/${pendingDuel.id}`}
+                        </code>
+                        <button
+                          onClick={handleCopyLink}
+                          className="text-[10px] text-neon-magenta hover:text-white border border-neon-magenta/40 px-2 py-1 font-mono uppercase tracking-wider whitespace-nowrap"
+                        >
+                          {copied ? 'COPIED' : 'COPY'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={handleCopyLink}
+                      className="w-full text-[11px] text-neon-green/70 hover:text-neon-green transition-colors flex items-center justify-center gap-1.5 font-mono"
+                    >
+                      <svg
+                        className="w-3 h-3"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
+                        />
+                      </svg>
+                      {copied ? 'LINK COPIED' : 'COPY INVITE LINK'}
+                    </button>
+                  )}
+                </div>
               )}
 
               <Button variant="ghost" size="sm" onClick={handleCancel}>

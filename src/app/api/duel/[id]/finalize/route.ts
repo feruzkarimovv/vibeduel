@@ -123,6 +123,7 @@ export async function POST(
     if (duel.player2_id) {
       await updateElo(
         sb,
+        duel.id,
         duel.player1_id,
         duel.player2_id,
         submitterIsP1 ? 'player1' : 'player2',
@@ -239,7 +240,7 @@ ${sub2.code || '// No code submitted'}`;
     .eq('id', params.id);
 
   if (duel.player2_id) {
-    await updateElo(sb, duel.player1_id, duel.player2_id, scores.winner);
+    await updateElo(sb, duel.id, duel.player1_id, duel.player2_id, scores.winner);
   }
 
   return NextResponse.json(scores);
@@ -271,6 +272,7 @@ async function reconstruct(
 
 async function updateElo(
   sb: ReturnType<typeof getAdminClient>,
+  duelId: string,
   player1Id: string,
   player2Id: string,
   winner: 'player1' | 'player2' | 'draw',
@@ -313,4 +315,15 @@ async function updateElo(
       draws: p2.draws + (winner === 'draw' ? 1 : 0),
     })
     .eq('id', player2Id);
+
+  // Snapshot ELO change on the duel row for the /me history graph.
+  await sb
+    .from('duels')
+    .update({
+      player1_elo_before: p1.elo,
+      player1_elo_after: newElo1,
+      player2_elo_before: p2.elo,
+      player2_elo_after: newElo2,
+    })
+    .eq('id', duelId);
 }

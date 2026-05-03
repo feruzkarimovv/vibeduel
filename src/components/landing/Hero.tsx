@@ -225,7 +225,7 @@ export default function Hero() {
         </div>
 
         {/* CTA buttons */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16 opacity-0 animate-slide-up-delay-2">
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-6 opacity-0 animate-slide-up-delay-2">
           <Link href="/duel">
             <Button size="lg">
               ENTER THE ARENA
@@ -235,6 +235,16 @@ export default function Hero() {
             <Button variant="ghost" size="lg">
               RANKINGS
             </Button>
+          </Link>
+        </div>
+        {/* Secondary nav */}
+        <div className="flex items-center justify-center gap-4 mb-12 opacity-0 animate-slide-up-delay-2 text-[10px] font-mono uppercase tracking-[0.2em]">
+          <Link href="/me" className="text-zinc-600 hover:text-neon-green transition-colors">
+            Profile
+          </Link>
+          <span className="text-zinc-800">/</span>
+          <Link href="/auth" className="text-zinc-600 hover:text-neon-green transition-colors">
+            Sign In
           </Link>
         </div>
 

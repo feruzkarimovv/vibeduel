@@ -616,14 +616,19 @@ export default function DuelRoom() {
             </span>
           </div>
           <h2 className="text-xl font-black text-white uppercase tracking-tight">
-            Duel Not Found
+            Duel Not Found Or Already Started
           </h2>
           <p className="text-zinc-600 text-xs font-mono">
-            This duel doesn&apos;t exist or has already ended.
+            You can still watch as a spectator.
           </p>
-          <Link href="/duel">
-            <Button>BACK TO LOBBY</Button>
-          </Link>
+          <div className="flex items-center gap-3 justify-center">
+            <Link href={`/duel/${duelId}/watch`}>
+              <Button>WATCH</Button>
+            </Link>
+            <Link href="/duel">
+              <Button variant="ghost">BACK TO LOBBY</Button>
+            </Link>
+          </div>
         </div>
       </main>
     );

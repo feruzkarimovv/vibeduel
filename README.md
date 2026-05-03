@@ -105,9 +105,15 @@ Built for Vercel. The `/duel/[id]` route is a client component dynamically impor
 
 Set the four env vars (`ANTHROPIC_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) in the Vercel project settings.
 
-## What's not implemented
+## Features
 
-- Real auth (everything is anonymous-localStorage). Multi-account ELO farming is trivial.
-- Spectator mode / replays.
-- Private invite flow has the column (`invited_only`) but no UI to create/share invite-only duels yet.
-- Per-player ELO history graph.
+- **Auth (`/auth`)** — email + password via Supabase Auth. Guests can still play; signing in upgrades the existing localStorage guest player to a permanent account that survives across devices.
+- **Profile (`/me`)** — current ELO, W/L/D record, win-rate, and a line chart of ELO across completed duels (data stored in `duels.player1_elo_after` / `player2_elo_after` on finalize).
+- **Private duels** — "CREATE PRIVATE DUEL" in the lobby creates an `invited_only` duel that the public matchmaker excludes; share the URL with whoever you want to play.
+- **Spectator mode (`/duel/[id]/watch`)** — read-only side-by-side view of both players' live previews + scores. Subscribes to realtime; works for in-progress and completed duels.
+
+## Open work
+
+- Multi-account ELO farming is still possible if both accounts are different signed-in users. A captcha + email-domain check on sign-up would help.
+- Private duel doesn't yet auto-cancel after a TTL if the invitee never joins (matchmaker prunes regular waiting duels at 2 min — same logic could extend here).
+- Spectator mode shows the live preview but not the opponent's iteration count or prompt history.

@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS players (
   wins INTEGER DEFAULT 0,
   losses INTEGER DEFAULT 0,
   draws INTEGER DEFAULT 0,
+  auth_user_id UUID UNIQUE REFERENCES auth.users(id) ON DELETE SET NULL,
+  email TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -22,6 +24,11 @@ CREATE TABLE IF NOT EXISTS duels (
   status TEXT DEFAULT 'waiting' CHECK (status IN ('waiting', 'countdown', 'active', 'judging', 'complete')),
   winner_id UUID REFERENCES players(id),
   invited_only BOOLEAN NOT NULL DEFAULT FALSE,
+  -- ELO snapshots written during finalize, used for /me history graph
+  player1_elo_before INTEGER,
+  player1_elo_after INTEGER,
+  player2_elo_before INTEGER,
+  player2_elo_after INTEGER,
   created_at TIMESTAMPTZ DEFAULT now(),
   started_at TIMESTAMPTZ,
   ended_at TIMESTAMPTZ
