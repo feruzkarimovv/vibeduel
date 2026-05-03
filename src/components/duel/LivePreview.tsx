@@ -173,18 +173,28 @@ export default function LivePreview({
   const [debouncedCode, setDebouncedCode] = useState(DEFAULT_CODE);
   const [hasError, setHasError] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  // Stash the most recent code we received so we can compile it the moment
+  // streaming ends, without waiting for another `code` prop change.
+  const latestCodeRef = useRef(code);
 
   useEffect(() => {
+    latestCodeRef.current = code;
+
+    // CRITICAL: do NOT update Sandpack while streaming. Partial JSX is a
+    // SyntaxError, and Sandpack's outer error UI crashes on the partial code
+    // with `"message" is read-only` (a frozen-Error-prototype bug we can't
+    // catch from INDEX_JS). Keep the previous successful render visible until
+    // the stream completes.
+    if (isStreaming) return;
+
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
-
-    const delay = isStreaming ? 1500 : 500;
-
     timeoutRef.current = setTimeout(() => {
-      if (code && code.trim().length > 50) {
-        setDebouncedCode(code);
+      const finalCode = latestCodeRef.current;
+      if (finalCode && finalCode.trim().length > 50) {
+        setDebouncedCode(finalCode);
         setHasError(false);
       }
-    }, delay);
+    }, 250);
 
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
