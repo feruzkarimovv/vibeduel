@@ -116,10 +116,23 @@ export default function Leaderboard() {
           </div>
 
           {loading ? (
-            <div className="px-4 py-8 text-center">
-              <p className="text-zinc-700 font-mono text-xs uppercase tracking-wider animate-pulse">
-                Loading rankings...
-              </p>
+            <div aria-busy aria-label="Loading rankings">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="grid grid-cols-[3rem_1fr_5rem_3.5rem_3.5rem_3.5rem] gap-2 px-4 py-3 border-b border-arena-line/50 last:border-b-0"
+                >
+                  <div className="h-3 bg-arena-mid animate-pulse" />
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-6 h-6 bg-arena-mid animate-pulse" />
+                    <div className="h-3 w-24 bg-arena-mid animate-pulse" />
+                  </div>
+                  <div className="h-3 bg-arena-mid animate-pulse" />
+                  <div className="h-3 bg-arena-mid animate-pulse" />
+                  <div className="h-3 bg-arena-mid animate-pulse" />
+                  <div className="h-3 bg-arena-mid animate-pulse" />
+                </div>
+              ))}
             </div>
           ) : players.length === 0 ? (
             <div className="px-4 py-8 text-center">

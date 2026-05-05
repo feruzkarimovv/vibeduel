@@ -15,7 +15,14 @@ const spaceMono = Space_Mono({
   display: 'swap',
 });
 
+// Resolves OG / Twitter image URLs to absolute. Vercel sets VERCEL_URL on
+// every deploy; locally it falls back to localhost.
+const baseUrl =
+  process.env.NEXT_PUBLIC_SITE_URL ??
+  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+
 export const metadata: Metadata = {
+  metadataBase: new URL(baseUrl),
   title: 'VibeDuel — The Competitive Arena for AI-Powered Coding',
   description:
     'Race head-to-head in timed coding challenges. Vibecode faster. Ship or get shipped.',
@@ -34,9 +41,8 @@ export const metadata: Metadata = {
     description:
       'The competitive arena for AI-powered coding. Race head-to-head in timed challenges.',
   },
-  icons: {
-    icon: '/favicon.ico',
-  },
+  // Icons (icon.tsx) and OG image (opengraph-image.tsx) are auto-detected
+  // by Next.js from the app/ directory.
 };
 
 export default function RootLayout({

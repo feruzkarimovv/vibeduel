@@ -195,3 +195,47 @@ test('12. /auth page renders sign-in form', async () => {
   await expect(page.getByText(/CREATE ACCOUNT/i).first()).toBeVisible();
   await ctx.close();
 });
+
+test('13. invitee prejoin: third-party visitor sees JOIN DUEL screen', async () => {
+  // Create a private duel as a fresh player.
+  const hostCtx = await browser.newContext();
+  const host = await hostCtx.newPage();
+  await host.goto('http://localhost:3000/duel');
+  await expect(host.getByText('SELECT CHALLENGE', { exact: true })).toBeVisible({ timeout: 15000 });
+  await host.getByRole('button', { name: /CREATE PRIVATE DUEL/i }).click();
+  await expect(host.getByText(/WAITING FOR INVITEE/i)).toBeVisible({ timeout: 10000 });
+
+  // Pluck the invite URL from the WAITING screen.
+  const inviteLink = await host.locator('code').first().innerText();
+  expect(inviteLink).toMatch(/\/duel\/[a-f0-9-]+/);
+
+  // A different player follows the invite — they should see the prejoin
+  // screen (NOT auto-claim P2 silently).
+  const inviteeCtx = await browser.newContext();
+  const invitee = await inviteeCtx.newPage();
+  await invitee.goto(inviteLink);
+  await expect(invitee.getByText(/You.*been invited to a duel/i)).toBeVisible({ timeout: 15000 });
+  await expect(invitee.getByRole('button', { name: /JOIN DUEL/i })).toBeVisible();
+  await expect(invitee.getByRole('button', { name: /WATCH INSTEAD/i })).toBeVisible();
+
+  await hostCtx.close();
+  await inviteeCtx.close();
+});
+
+test('14. /api/generate rejects unbound calls with 400/403', async ({ request }) => {
+  // No duel_id / player_id → 400
+  const a = await request.post('http://localhost:3000/api/generate', {
+    data: { prompt: 'hi' },
+  });
+  expect([400, 429]).toContain(a.status());
+
+  // Random duel + player → 404 or 403 depending on which check fires first
+  const b = await request.post('http://localhost:3000/api/generate', {
+    data: {
+      prompt: 'hi',
+      duel_id: '00000000-0000-0000-0000-000000000000',
+      player_id: '00000000-0000-0000-0000-000000000000',
+    },
+  });
+  expect([400, 403, 404, 429]).toContain(b.status());
+});

@@ -147,9 +147,7 @@ export default function ProfilePage() {
         </div>
 
         {loading ? (
-          <p className="text-zinc-700 font-mono text-xs uppercase tracking-wider animate-pulse">
-            Loading...
-          </p>
+          <ProfileSkeleton />
         ) : !player ? (
           <p className="text-zinc-600 font-mono text-xs">No player found.</p>
         ) : (
@@ -223,6 +221,38 @@ export default function ProfilePage() {
         )}
       </div>
     </main>
+  );
+}
+
+function ProfileSkeleton() {
+  return (
+    <div aria-busy aria-label="Loading profile">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-10">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="border border-arena-line bg-arena-dark p-4">
+            <div className="w-16 h-2 bg-arena-mid animate-pulse mb-3" />
+            <div className="w-24 h-7 bg-arena-mid animate-pulse" />
+          </div>
+        ))}
+      </div>
+      <div className="border border-arena-line bg-arena-dark p-6 mb-6">
+        <div className="w-24 h-2 bg-arena-mid animate-pulse mb-6" />
+        <div className="w-full h-[180px] bg-arena-mid/50 animate-pulse" />
+      </div>
+      <div className="border border-arena-line bg-arena-dark">
+        {[0, 1, 2, 3].map((i) => (
+          <div
+            key={i}
+            className="grid grid-cols-[3rem_1fr_4rem_5rem] gap-2 px-4 py-3 border-b border-arena-line/50 last:border-b-0"
+          >
+            <div className="h-3 bg-arena-mid animate-pulse" />
+            <div className="h-3 bg-arena-mid animate-pulse" />
+            <div className="h-3 bg-arena-mid animate-pulse" />
+            <div className="h-3 bg-arena-mid animate-pulse" />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

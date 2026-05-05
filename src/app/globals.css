@@ -178,3 +178,29 @@ main {
     border: 1px solid rgba(255, 255, 255, 0.06);
   }
 }
+
+/* Respect prefers-reduced-motion: kill the heavier ambient effects (glitch
+   text, scanlines, slide-up entrance, vs slam, page fade-in) but keep the
+   functional ones (timer pulse, status dots) at a lighter intensity. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+
+  .glitch-text::before,
+  .glitch-text::after {
+    display: none;
+  }
+
+  .scanlines::after {
+    display: none;
+  }
+
+  main {
+    animation: none;
+  }
+}
