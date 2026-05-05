@@ -745,9 +745,9 @@ export default function DuelRoom() {
   const isActive = phase === 'active';
 
   return (
-    <main className="h-screen flex flex-col bg-arena-black overflow-hidden">
+    <main className="min-h-screen lg:h-screen flex flex-col bg-arena-black lg:overflow-hidden">
       {/* Top bar */}
-      <header className="flex-shrink-0 flex items-center justify-between px-4 py-2 border-b border-arena-line bg-arena-dark/80">
+      <header className="flex-shrink-0 flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-b border-arena-line bg-arena-dark/80">
         <div className="flex items-center gap-3 min-w-0">
           <Link
             href="/"
@@ -774,26 +774,10 @@ export default function DuelRoom() {
         <OpponentView opponent={opponent} progress={opponentProgress} />
       </header>
 
-      {/* Main duel area */}
-      <div
-        style={{
-          display: 'flex',
-          flex: 1,
-          overflow: 'hidden',
-          position: 'relative',
-        }}
-      >
+      {/* Main duel area: stacked on mobile, 50/50 split on desktop */}
+      <div className="flex flex-col lg:flex-row flex-1 min-h-0 lg:overflow-hidden relative">
         {/* Left: editor + prompt */}
-        <div
-          style={{
-            width: '50%',
-            display: 'flex',
-            flexDirection: 'column',
-            padding: '12px',
-            gap: '8px',
-            minHeight: 0,
-          }}
-        >
+        <div className="flex flex-col w-full lg:w-1/2 p-3 gap-2 min-h-[60vh] lg:min-h-0 min-w-0">
           <div className="text-[10px] text-zinc-600 font-mono uppercase tracking-wider flex items-center justify-between flex-shrink-0">
             <span>Your Solution</span>
             {code.trim() &&
@@ -807,7 +791,7 @@ export default function DuelRoom() {
                 </button>
               )}
           </div>
-          <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          <div className="flex-1 min-h-[280px] lg:min-h-0 overflow-hidden">
             <CodeEditor
               code={code}
               onChange={setCode}
@@ -826,7 +810,7 @@ export default function DuelRoom() {
           </div>
         </div>
 
-        {/* Divider */}
+        {/* Divider — desktop only */}
         <div className="hidden lg:block absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-px z-10">
           <div className="h-full w-full bg-gradient-to-b from-neon-green/20 via-arena-line to-neon-magenta/20" />
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-6 h-6 bg-arena-black border border-arena-line flex items-center justify-center rotate-45">
@@ -835,27 +819,11 @@ export default function DuelRoom() {
         </div>
 
         {/* Right: live preview */}
-        <div
-          style={{
-            width: '50%',
-            display: 'flex',
-            flexDirection: 'column',
-            padding: '12px',
-            minHeight: 0,
-          }}
-        >
+        <div className="flex flex-col w-full lg:w-1/2 p-3 min-h-[55vh] lg:min-h-0 min-w-0 border-t border-arena-line lg:border-t-0">
           <div className="text-[10px] text-zinc-600 mb-2 font-mono uppercase tracking-wider flex-shrink-0">
             Live Preview
           </div>
-          <div
-            style={{
-              flex: 1,
-              minHeight: 0,
-              overflow: 'hidden',
-              border: '1px solid var(--arena-line)',
-              background: 'rgba(10,10,10,0.8)',
-            }}
-          >
+          <div className="flex-1 min-h-[280px] lg:min-h-0 overflow-hidden border border-arena-line bg-arena-dark/80">
             <LivePreview code={code} isStreaming={isGenerating} />
           </div>
         </div>

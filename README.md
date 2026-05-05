@@ -69,13 +69,15 @@ npm run test:e2e
 
 ## Database schema
 
-- **players**: id, username, avatar_seed, elo (default 1200), wins/losses/draws, created_at
-- **duels**: id, challenge_id, player1_id, player2_id, status (`waiting | countdown | active | judging | complete`), winner_id, invited_only, created_at, started_at, ended_at
-- **submissions**: id, duel_id, player_id, code, score, score_breakdown (JSON), submitted_at — UNIQUE (duel_id, player_id)
+- **players**: id, username, avatar_seed, elo (default 1200), wins/losses/draws, auth_user_id, email, created_at — UNIQUE on `lower(email)` to block multi-account farming.
+- **duels**: id, challenge_id, player1_id, player2_id, status (`waiting | countdown | active | judging | complete`), winner_id, invited_only, player{1,2}_elo_{before,after}, created_at, started_at, ended_at — indexed on `(status, invited_only)` and `(player{1,2}_id, ended_at)`.
+- **submissions**: id, duel_id, player_id, code, iterations, score, score_breakdown (JSON), submitted_at — UNIQUE (duel_id, player_id).
 
 **RLS:** anon clients have `SELECT` on all three tables and `INSERT` on `players` only. All other writes require `service_role`.
 
-**Realtime:** `duels` and `submissions` are added to the `supabase_realtime` publication. Both clients subscribe to `postgres_changes` for their duel.
+**Realtime:** `duels` and `submissions` are added to the `supabase_realtime` publication. Both clients subscribe to `postgres_changes` for their duel; live progress (lines / iteration / status) goes over a separate `broadcast` channel that the spectator view also listens on.
+
+**Auth:** `middleware.ts` runs Supabase's SSR `getUser()` on every request to keep session cookies fresh. `/auth/callback` exchanges the code from email-confirmation links for a session.
 
 ## Race condition handling
 
@@ -97,7 +99,9 @@ In-memory token bucket per IP, scoped per route. For multi-instance deploys, swa
 | `/api/duel/[id]/start` | 5 | 1 / 2s |
 | `/api/duel/[id]/finalize` | 3 | 1 / 10s |
 | `/api/submit` | 5 | 1 / 2s |
-| `/api/generate` | (size + count caps) | — |
+| `/api/generate` | 6 | 1 / 30s |
+
+`/api/generate` additionally requires `{ duel_id, player_id }`, verifies the player is in an `active` duel, uses the duel's `challenge_id` (server-trusted) to build the prompt, and rejects with `429` once `submissions.iterations` for that `(duel_id, player_id)` reaches 5.
 
 ## Deployment
 
@@ -114,6 +118,6 @@ Set the four env vars (`ANTHROPIC_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PU
 
 ## Open work
 
-- Multi-account ELO farming is still possible if both accounts are different signed-in users. A captcha + email-domain check on sign-up would help.
-- Private duel doesn't yet auto-cancel after a TTL if the invitee never joins (matchmaker prunes regular waiting duels at 2 min — same logic could extend here).
-- Spectator mode shows the live preview but not the opponent's iteration count or prompt history.
+- Multi-account ELO farming with **different** emails is still possible (the `UNIQUE` index only blocks reuse of the same address). A captcha and email-domain blocklist on sign-up would close most of the rest.
+- Iteration counter increment on `/api/generate` is read-modify-write — a fast double-click can sneak one extra iteration. A Postgres function for atomic increment would close it.
+- Spectator mode now shows iteration counts but not the actual prompt history.
