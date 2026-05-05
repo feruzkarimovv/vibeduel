@@ -28,7 +28,11 @@ export default function AuthForm() {
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const callbackError =
+    params.get('error') === 'callback'
+      ? "Couldn't verify that email link — try signing in directly."
+      : null;
+  const [error, setError] = useState<string | null>(callbackError);
   const [info, setInfo] = useState<string | null>(null);
 
   useEffect(() => {
