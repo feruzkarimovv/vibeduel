@@ -165,6 +165,16 @@ export default function DuelLobby() {
     setLobbyState('selecting');
   }, [pendingDuel, supabase, player]);
 
+  // Esc to abort matchmaking — common gamer expectation, less mouse work.
+  useEffect(() => {
+    if (lobbyState !== 'searching') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleCancel();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lobbyState, handleCancel]);
+
   const handleNewChallenge = () => {
     setChallenge(getRandomChallenge());
   };
@@ -299,6 +309,7 @@ export default function DuelLobby() {
                         </code>
                         <button
                           onClick={handleCopyLink}
+                          aria-label="Copy invite link to clipboard"
                           className="text-[10px] text-neon-magenta hover:text-white border border-neon-magenta/40 px-2 py-1 font-mono uppercase tracking-wider whitespace-nowrap"
                         >
                           {copied ? 'COPIED' : 'COPY'}
@@ -308,9 +319,11 @@ export default function DuelLobby() {
                   ) : (
                     <button
                       onClick={handleCopyLink}
+                      aria-label="Copy invite link to clipboard"
                       className="w-full text-[11px] text-neon-green/70 hover:text-neon-green transition-colors flex items-center justify-center gap-1.5 font-mono"
                     >
                       <svg
+                        aria-hidden="true"
                         className="w-3 h-3"
                         fill="none"
                         viewBox="0 0 24 24"
@@ -332,6 +345,9 @@ export default function DuelLobby() {
               <Button variant="ghost" size="sm" onClick={handleCancel}>
                 CANCEL
               </Button>
+              <p className="text-[9px] text-zinc-800 font-mono uppercase tracking-[0.2em]">
+                ESC to cancel
+              </p>
             </div>
           )}
 
@@ -339,6 +355,7 @@ export default function DuelLobby() {
             <div className="flex flex-col items-center gap-4 py-6">
               <div className="w-12 h-12 border-2 border-neon-green flex items-center justify-center box-glow-green">
                 <svg
+                  aria-hidden="true"
                   className="w-6 h-6 text-neon-green"
                   fill="none"
                   viewBox="0 0 24 24"

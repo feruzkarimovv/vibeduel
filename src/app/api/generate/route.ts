@@ -104,18 +104,23 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'invalid challenge' }, { status: 500 });
   }
 
-  // Server-side iteration cap. Without this, a scripted client can keep
-  // calling /api/generate past the 5-prompt UX limit and burn arbitrary
-  // Anthropic spend. The submissions row is created lazily on first generate
-  // and the bookkeeping survives /api/submit (which only writes code).
-  const { data: subRow } = await sb
-    .from('submissions')
-    .select('id, iterations')
-    .eq('duel_id', duel_id)
-    .eq('player_id', player_id)
-    .maybeSingle();
-  const currentIterations = subRow?.iterations ?? 0;
-  if (currentIterations >= MAX_ITERATIONS) {
+  // Server-side iteration cap, atomically claimed via claim_iteration().
+  // Without this, a scripted client can keep calling /api/generate past the
+  // 5-prompt UX limit and burn arbitrary Anthropic spend. The RPC returns -1
+  // when the cap is reached. The submissions row is created lazily here on
+  // first generate and survives /api/submit (which only writes code).
+  const { data: claimed, error: claimErr } = await sb.rpc('claim_iteration', {
+    p_duel_id: duel_id,
+    p_player_id: player_id,
+    p_max: MAX_ITERATIONS,
+  });
+  if (claimErr || claimed == null) {
+    return NextResponse.json(
+      { error: 'failed to claim iteration' },
+      { status: 500 },
+    );
+  }
+  if (claimed === -1) {
     return NextResponse.json(
       { error: 'iteration cap reached' },
       { status: 429 },
@@ -191,23 +196,6 @@ ${existingCode}`
     const message =
       error instanceof Error ? error.message : 'Unknown error opening stream';
     return NextResponse.json({ error: message }, { status });
-  }
-
-  // We're past the API auth/quota gate and committed to spending tokens —
-  // record the iteration. Read-modify-write is racy under double-clicks
-  // (worst case the player sneaks one extra), but the cap still holds.
-  if (subRow) {
-    await sb
-      .from('submissions')
-      .update({ iterations: currentIterations + 1 })
-      .eq('id', subRow.id);
-  } else {
-    await sb.from('submissions').insert({
-      duel_id,
-      player_id,
-      code: '',
-      iterations: 1,
-    });
   }
 
   const encoder = new TextEncoder();

@@ -171,7 +171,6 @@ export default function LivePreview({
   isStreaming = false,
 }: LivePreviewProps) {
   const [debouncedCode, setDebouncedCode] = useState(DEFAULT_CODE);
-  const [hasError, setHasError] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
   // Stash the most recent code we received so we can compile it the moment
   // streaming ends, without waiting for another `code` prop change.
@@ -192,7 +191,6 @@ export default function LivePreview({
       const finalCode = latestCodeRef.current;
       if (finalCode && finalCode.trim().length > 50) {
         setDebouncedCode(finalCode);
-        setHasError(false);
       }
     }, 250);
 
@@ -216,13 +214,6 @@ export default function LivePreview({
               <div className="w-1.5 h-1.5 bg-amber-500 animate-pulse" />
               <span className="text-[10px] text-amber-500 font-mono">
                 STREAMING
-              </span>
-            </>
-          ) : hasError ? (
-            <>
-              <div className="w-1.5 h-1.5 bg-neon-magenta" />
-              <span className="text-[10px] text-neon-magenta font-mono">
-                ERROR
               </span>
             </>
           ) : code.trim() ? (

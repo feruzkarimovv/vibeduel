@@ -56,6 +56,44 @@ CREATE TABLE IF NOT EXISTS submissions (
 ALTER TABLE submissions
   ADD COLUMN IF NOT EXISTS iterations INTEGER NOT NULL DEFAULT 0;
 
+-- Atomic iteration counter for /api/generate. Returns the new iteration
+-- count, or -1 when the cap is reached. Race-safe: the UPDATE holds a row
+-- lock; the INSERT branch handles the no-row case and folds a concurrent
+-- INSERT (UNIQUE violation) into the cap-reached signal.
+CREATE OR REPLACE FUNCTION claim_iteration(
+  p_duel_id UUID,
+  p_player_id UUID,
+  p_max INTEGER
+) RETURNS INTEGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_count INTEGER;
+BEGIN
+  UPDATE submissions
+  SET iterations = iterations + 1
+  WHERE duel_id = p_duel_id
+    AND player_id = p_player_id
+    AND iterations < p_max
+  RETURNING iterations INTO v_count;
+
+  IF FOUND THEN
+    RETURN v_count;
+  END IF;
+
+  -- No row updated: either no row exists yet, or iterations >= p_max.
+  BEGIN
+    INSERT INTO submissions (duel_id, player_id, code, iterations)
+    VALUES (p_duel_id, p_player_id, '', 1)
+    RETURNING iterations INTO v_count;
+    RETURN v_count;
+  EXCEPTION WHEN unique_violation THEN
+    -- Row exists at >= cap (or a concurrent insert just landed).
+    RETURN -1;
+  END;
+END;
+$$;
+
 -- Unique constraint: one submission per player per duel
 CREATE UNIQUE INDEX IF NOT EXISTS unique_submission_per_player_per_duel
 ON submissions(duel_id, player_id);

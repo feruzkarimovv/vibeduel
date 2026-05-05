@@ -309,6 +309,8 @@ function EloChart({
   return (
     <div className="overflow-x-auto">
       <svg
+        role="img"
+        aria-label={`ELO history across ${points.length} duels`}
         viewBox={`0 0 ${W} ${H}`}
         className="w-full h-[200px]"
         preserveAspectRatio="none"
