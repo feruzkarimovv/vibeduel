@@ -101,13 +101,20 @@ In-memory token bucket per IP, scoped per route. For multi-instance deploys, swa
 | `/api/submit` | 5 | 1 / 2s |
 | `/api/generate` | 6 | 1 / 30s |
 
-`/api/generate` additionally requires `{ duel_id, player_id }`, verifies the player is in an `active` duel, uses the duel's `challenge_id` (server-trusted) to build the prompt, and rejects with `429` once `submissions.iterations` for that `(duel_id, player_id)` reaches 5.
+`/api/generate` additionally requires `{ duel_id, player_id }`, verifies the player is in an `active` duel, uses the duel's `challenge_id` (server-trusted) to build the prompt, and atomically claims an iteration via the `claim_iteration(duel, player, max)` Postgres function — rejecting with `429` once `submissions.iterations` reaches 5. The atomic claim closes the read-modify-write race a fast double-click would otherwise exploit.
 
 ## Deployment
 
 Built for Vercel. The `/duel/[id]` route is a client component dynamically imported with `ssr: false` (it depends on browser-only Supabase client + Sandpack) — both `app/duel/page.tsx` and `app/duel/[id]/page.tsx` follow this pattern.
 
-Set the four env vars (`ANTHROPIC_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) in the Vercel project settings.
+Set the four required env vars in the Vercel project settings:
+
+- `ANTHROPIC_API_KEY`
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+Optional: `NEXT_PUBLIC_SITE_URL` (e.g. `https://vibeduel.com`) — used as `metadataBase` so OG/Twitter image URLs resolve absolute. Falls back to `VERCEL_URL` and then `localhost:3000`.
 
 ## Features
 
@@ -119,5 +126,4 @@ Set the four env vars (`ANTHROPIC_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PU
 ## Open work
 
 - Multi-account ELO farming with **different** emails is still possible (the `UNIQUE` index only blocks reuse of the same address). A captcha and email-domain blocklist on sign-up would close most of the rest.
-- Iteration counter increment on `/api/generate` is read-modify-write — a fast double-click can sneak one extra iteration. A Postgres function for atomic increment would close it.
-- Spectator mode now shows iteration counts but not the actual prompt history.
+- Spectator mode shows iteration counts but not the actual prompt history.
