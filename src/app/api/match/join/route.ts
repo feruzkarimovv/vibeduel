@@ -31,13 +31,23 @@ export async function POST(req: Request) {
   }
 
   const sb = getAdminClient();
+
+  // Same 2-min staleness sweep that /api/match runs — keeps abandoned
+  // private invites from lingering forever.
+  const cutoff = new Date(Date.now() - 120 * 1000).toISOString();
+  await sb
+    .from('duels')
+    .delete()
+    .eq('status', 'waiting')
+    .lt('created_at', cutoff);
+
   const { data: existing } = await sb
     .from('duels')
     .select('*')
     .eq('id', duel_id)
-    .single();
+    .maybeSingle();
   if (!existing) {
-    return NextResponse.json({ error: 'duel not found' }, { status: 404 });
+    return NextResponse.json({ error: 'duel not found or expired' }, { status: 404 });
   }
 
   // Already in the duel — return as-is.

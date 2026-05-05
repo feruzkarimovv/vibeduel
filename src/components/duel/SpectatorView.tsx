@@ -11,7 +11,13 @@ import { createClient } from '@/lib/supabase/client';
 import { fetchDuel, fetchDuelPlayers } from '@/lib/matchmaking';
 import { getChallengeById } from '@/lib/challenges';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Challenge, Player, DuelRow, SubmissionRow } from '@/types';
+import type {
+  Challenge,
+  Player,
+  DuelRow,
+  SubmissionRow,
+  OpponentProgress,
+} from '@/types';
 
 function useSupabase() {
   const ref = useRef<SupabaseClient | null>(null);
@@ -36,6 +42,7 @@ export default function SpectatorView() {
     s1: SubmissionRow | null;
     s2: SubmissionRow | null;
   }>({ s1: null, s2: null });
+  const [progress, setProgress] = useState<Record<string, OpponentProgress>>({});
   const [notFound, setNotFound] = useState(false);
 
   // Load
@@ -100,8 +107,21 @@ export default function SpectatorView() {
         },
       )
       .subscribe();
+
+    // Same broadcast channel the duel room itself uses for live progress.
+    // We listen but never send — spectators are read-only.
+    const progressChannel = sb
+      .channel(`progress:${duelId}`)
+      .on('broadcast', { event: 'progress' }, ({ payload }) => {
+        const p = payload as OpponentProgress;
+        if (!p?.playerId) return;
+        setProgress((prev) => ({ ...prev, [p.playerId]: p }));
+      })
+      .subscribe();
+
     return () => {
       sb.removeChannel(channel);
+      sb.removeChannel(progressChannel);
     };
   }, [supabase, duel, duelId]);
 
@@ -173,14 +193,18 @@ export default function SpectatorView() {
           side="left"
           player={players.p1}
           submission={submissions.s1}
+          progress={players.p1 ? progress[players.p1.id] ?? null : null}
           isWinner={isComplete && duel.winner_id === duel.player1_id}
+          isLive={isActive}
         />
         <div className="hidden lg:block w-px bg-arena-line" />
         <PlayerPane
           side="right"
           player={players.p2}
           submission={submissions.s2}
+          progress={players.p2 ? progress[players.p2.id] ?? null : null}
           isWinner={isComplete && duel.winner_id === duel.player2_id}
+          isLive={isActive}
         />
       </div>
     </main>
@@ -191,12 +215,16 @@ function PlayerPane({
   side,
   player,
   submission,
+  progress,
   isWinner,
+  isLive,
 }: {
   readonly side: 'left' | 'right';
   readonly player: Player | null;
   readonly submission: SubmissionRow | null;
+  readonly progress: OpponentProgress | null;
   readonly isWinner: boolean;
+  readonly isLive: boolean;
 }) {
   // Static class names — Tailwind's JIT won't compile interpolated tokens
   // like `border-${accent}/40`, so the avatar's color was silently missing.
@@ -204,6 +232,7 @@ function PlayerPane({
     side === 'left'
       ? 'border-neon-green/40 text-neon-green'
       : 'border-neon-magenta/40 text-neon-magenta';
+  const status = progress?.status ?? 'idle';
   return (
     <div className="flex-1 flex flex-col min-h-0 p-3 gap-2">
       <div className="flex items-center justify-between">
@@ -229,11 +258,28 @@ function PlayerPane({
             </span>
           )}
         </div>
-        {submission?.score != null && (
-          <span className="text-sm font-black text-neon-green tabular-nums font-mono">
-            {submission.score}
-          </span>
-        )}
+        <div className="flex items-center gap-3">
+          {isLive && progress && (
+            <span
+              className={`text-[10px] font-mono tabular-nums ${
+                status === 'submitted'
+                  ? 'text-neon-green'
+                  : status === 'coding'
+                    ? 'text-amber-400'
+                    : 'text-zinc-700'
+              }`}
+            >
+              {status === 'submitted'
+                ? 'DONE'
+                : `ITR ${progress.iterationCount}/5`}
+            </span>
+          )}
+          {submission?.score != null && (
+            <span className="text-sm font-black text-neon-green tabular-nums font-mono">
+              {submission.score}
+            </span>
+          )}
+        </div>
       </div>
       <div className="flex-1 min-h-0 border border-arena-line bg-arena-dark overflow-hidden">
         <LivePreview code={submission?.code ?? ''} />

@@ -46,10 +46,15 @@ CREATE TABLE IF NOT EXISTS submissions (
   duel_id UUID REFERENCES duels(id) ON DELETE CASCADE,
   player_id UUID REFERENCES players(id),
   code TEXT NOT NULL DEFAULT '',
+  iterations INTEGER NOT NULL DEFAULT 0,
   score INTEGER,
   score_breakdown JSONB,
   submitted_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Backfill for existing databases (CREATE TABLE above is for fresh installs).
+ALTER TABLE submissions
+  ADD COLUMN IF NOT EXISTS iterations INTEGER NOT NULL DEFAULT 0;
 
 -- Unique constraint: one submission per player per duel
 CREATE UNIQUE INDEX IF NOT EXISTS unique_submission_per_player_per_duel
