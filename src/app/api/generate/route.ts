@@ -1,11 +1,31 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
+import { getAdminClient } from '@/lib/supabase/admin';
+import { rateLimit, clientKey } from '@/lib/rateLimit';
+import { getChallengeById } from '@/lib/challenges';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 const MAX_PROMPT_LEN = 2000;
 const MAX_EXISTING_CODE_LEN = 20000;
 const ERROR_SENTINEL = '\n\n__VIBEDUEL_STREAM_ERROR__:';
 
 export async function POST(req: Request) {
+  // Cost cap: per-IP burst of 6, refilling at 1/30s. The 5-iteration UX limit
+  // is enforced client-side, but the unauthenticated public endpoint also
+  // needs hard server-side bounds against scripted abuse.
+  const limit = rateLimit(clientKey(req, 'generate'), {
+    capacity: 6,
+    refillPerSecond: 1 / 30,
+  });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: 'Rate limit exceeded' },
+      { status: 429, headers: { 'Retry-After': String(limit.retryAfterSeconds) } },
+    );
+  }
+
   if (!process.env.ANTHROPIC_API_KEY) {
     return NextResponse.json(
       { error: 'ANTHROPIC_API_KEY is not configured' },
@@ -15,8 +35,9 @@ export async function POST(req: Request) {
 
   let body: {
     prompt?: unknown;
-    challenge?: { title?: unknown; description?: unknown; criteria?: unknown };
     existingCode?: unknown;
+    duel_id?: unknown;
+    player_id?: unknown;
   };
   try {
     body = await req.json();
@@ -24,7 +45,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { prompt, challenge, existingCode } = body;
+  const { prompt, existingCode, duel_id, player_id } = body;
 
   if (typeof prompt !== 'string' || !prompt.trim()) {
     return NextResponse.json(
@@ -39,16 +60,6 @@ export async function POST(req: Request) {
     );
   }
   if (
-    !challenge ||
-    typeof challenge !== 'object' ||
-    typeof challenge.title !== 'string'
-  ) {
-    return NextResponse.json(
-      { error: 'A valid challenge object is required' },
-      { status: 400 },
-    );
-  }
-  if (
     existingCode !== undefined &&
     (typeof existingCode !== 'string' ||
       existingCode.length > MAX_EXISTING_CODE_LEN)
@@ -57,6 +68,39 @@ export async function POST(req: Request) {
       { error: `existingCode must be a string under ${MAX_EXISTING_CODE_LEN} chars` },
       { status: 400 },
     );
+  }
+  if (typeof duel_id !== 'string' || typeof player_id !== 'string') {
+    return NextResponse.json(
+      { error: 'duel_id and player_id required' },
+      { status: 400 },
+    );
+  }
+
+  // Bind generation to an active duel that this player belongs to. The
+  // challenge object is still trusted from the client (it only shapes the
+  // prompt), but we re-validate the id against our challenge catalogue and
+  // confirm it matches the duel's challenge_id.
+  const sb = getAdminClient();
+  const { data: duel } = await sb
+    .from('duels')
+    .select('player1_id, player2_id, status, challenge_id')
+    .eq('id', duel_id)
+    .single();
+  if (!duel) {
+    return NextResponse.json({ error: 'duel not found' }, { status: 404 });
+  }
+  if (duel.player1_id !== player_id && duel.player2_id !== player_id) {
+    return NextResponse.json({ error: 'not in this duel' }, { status: 403 });
+  }
+  if (duel.status !== 'active') {
+    return NextResponse.json(
+      { error: `duel is ${duel.status}, not active` },
+      { status: 409 },
+    );
+  }
+  const serverChallenge = getChallengeById(duel.challenge_id);
+  if (!serverChallenge) {
+    return NextResponse.json({ error: 'invalid challenge' }, { status: 500 });
   }
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -75,9 +119,9 @@ export async function POST(req: Request) {
 - Do NOT use import statements except for React at the top.
 - You can use React hooks: useState, useEffect, useRef, useMemo, useCallback.
 
-The challenge is: ${challenge.title}
-Description: ${typeof challenge.description === 'string' ? challenge.description : ''}
-Scoring criteria: ${Array.isArray(challenge.criteria) ? challenge.criteria.join(', ') : ''}`;
+The challenge is: ${serverChallenge.title}
+Description: ${serverChallenge.description}
+Scoring criteria: ${serverChallenge.criteria.join(', ')}`;
 
   const systemPrompt = isRefine
     ? `You are editing an existing React component for a vibecoding arena called VibeDuel.

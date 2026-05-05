@@ -75,10 +75,7 @@ export async function getOrCreatePlayer(
         fallback_username: username,
       }),
     });
-    if (!res.ok) {
-      console.error('player/bind failed', await res.text().catch(() => ''));
-      return null;
-    }
+    if (!res.ok) return null;
     const { player } = await res.json();
     if (player && typeof window !== 'undefined') {
       localStorage.setItem(STORAGE_KEY, player.id);
@@ -106,10 +103,7 @@ export async function getOrCreatePlayer(
     .insert({ username })
     .select()
     .single();
-  if (error) {
-    console.error('Failed to create player:', error.message);
-    return null;
-  }
+  if (error) return null;
   if (data && typeof window !== 'undefined') {
     localStorage.setItem(STORAGE_KEY, data.id);
   }

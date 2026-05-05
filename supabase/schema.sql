@@ -15,6 +15,12 @@ CREATE TABLE IF NOT EXISTS players (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Block multi-account ELO farming with the same email. Existing rows with
+-- duplicate emails will need to be merged before this can be applied to a
+-- non-empty database.
+CREATE UNIQUE INDEX IF NOT EXISTS players_email_unique
+  ON players (lower(email)) WHERE email IS NOT NULL;
+
 -- Duels table
 CREATE TABLE IF NOT EXISTS duels (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -48,6 +54,16 @@ CREATE TABLE IF NOT EXISTS submissions (
 -- Unique constraint: one submission per player per duel
 CREATE UNIQUE INDEX IF NOT EXISTS unique_submission_per_player_per_duel
 ON submissions(duel_id, player_id);
+
+-- Hot-path indexes
+-- Matchmaking candidate scan: WHERE status='waiting' AND invited_only=false
+CREATE INDEX IF NOT EXISTS duels_status_invited_idx
+  ON duels (status, invited_only) WHERE status = 'waiting';
+-- /me history: WHERE player1_id = $1 OR player2_id = $1, ORDER BY ended_at
+CREATE INDEX IF NOT EXISTS duels_player1_ended_idx
+  ON duels (player1_id, ended_at);
+CREATE INDEX IF NOT EXISTS duels_player2_ended_idx
+  ON duels (player2_id, ended_at);
 
 -- Enable Realtime on duels and submissions
 ALTER PUBLICATION supabase_realtime ADD TABLE duels;

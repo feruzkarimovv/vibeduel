@@ -46,10 +46,15 @@ export default function Leaderboard() {
 
     const sb = supabase;
     async function load() {
+      // Only show players who have actually completed at least one duel — a
+      // freshly-created guest at the default ELO of 1200 would otherwise sit
+      // at the top of an empty board ahead of active players.
       const { data } = await sb
         .from('players')
         .select('id, username, elo, wins, losses, draws')
+        .or('wins.gt.0,losses.gt.0,draws.gt.0')
         .order('elo', { ascending: false })
+        .order('wins', { ascending: false })
         .limit(50);
 
       if (data) {

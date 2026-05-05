@@ -1,20 +1,9 @@
 'use client';
 
-import { useState } from 'react';
 import Link from 'next/link';
 import Button from '@/components/ui/Button';
 
 export default function CTA() {
-  const [email, setEmail] = useState('');
-  const [submitted, setSubmitted] = useState(false);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (email.trim()) {
-      setSubmitted(true);
-    }
-  };
-
   return (
     <section className="relative py-28 px-4 overflow-hidden noise">
       {/* Background */}
@@ -52,50 +41,10 @@ export default function CTA() {
           opponents. No frameworks. Just you, AI, and the clock.
         </p>
 
-        {/* Email form */}
-        <form
-          onSubmit={handleSubmit}
-          className="flex flex-col sm:flex-row items-stretch gap-3 max-w-md mx-auto mb-4"
-        >
-          {submitted ? (
-            <div className="w-full py-3 px-4 border border-neon-green/30 text-neon-green font-mono text-sm text-center">
-              <span className="mr-2">&#10003;</span>
-              REGISTERED. STAND BY FOR DEPLOYMENT.
-            </div>
-          ) : (
-            <>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="your@email.com"
-                className="flex-1 px-4 py-3 bg-arena-dark border border-arena-line text-white font-mono text-sm placeholder:text-zinc-700 focus:outline-none focus:border-neon-green/50 transition-colors"
-                required
-              />
-              <Button type="submit" className="sm:w-auto whitespace-nowrap">
-                GET ACCESS
-              </Button>
-            </>
-          )}
-        </form>
-
-        {!submitted && (
-          <p className="text-zinc-700 text-[10px] font-mono uppercase tracking-wider mb-14">
-            No spam. Duel invites only.
-          </p>
-        )}
-
-        {/* Divider */}
-        <div className="flex items-center gap-4 max-w-xs mx-auto mb-14">
-          <div className="flex-1 h-px bg-arena-line" />
-          <span className="text-zinc-700 font-mono text-[10px]">OR</span>
-          <div className="flex-1 h-px bg-arena-line" />
-        </div>
-
-        {/* Direct CTA */}
+        {/* Primary CTA */}
         <Link href="/duel">
           <Button variant="secondary" size="lg">
-            SKIP THE LINE — DUEL NOW
+            DUEL NOW
           </Button>
         </Link>
       </div>

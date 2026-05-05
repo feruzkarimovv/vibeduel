@@ -43,6 +43,42 @@ function TerminalLine({
   );
 }
 
+function ArenaStatus() {
+  const [active, setActive] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/stats')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d && typeof d.active === 'number') setActive(d.active);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <div className="opacity-0 animate-slide-up flex items-center justify-center gap-3 mb-12 font-mono text-[11px]">
+      <span className="text-zinc-700">[</span>
+      <span className="w-1.5 h-1.5 bg-neon-green rounded-full animate-pulse" />
+      <span className="text-neon-green/80 uppercase tracking-[0.2em]">
+        Arena Online
+      </span>
+      {active !== null && active > 0 && (
+        <>
+          <span className="text-zinc-700">/</span>
+          <span className="text-zinc-500">
+            {active} duel{active === 1 ? '' : 's'} active
+          </span>
+        </>
+      )}
+      <span className="text-zinc-700">]</span>
+    </div>
+  );
+}
+
 function FighterCard({
   side,
   name,
@@ -183,18 +219,7 @@ export default function Hero() {
       {/* Content */}
       <div className="max-w-6xl mx-auto w-full">
         {/* Top status bar */}
-        <div className="opacity-0 animate-slide-up flex items-center justify-center gap-3 mb-12 font-mono text-[11px]">
-          <span className="text-zinc-700">[</span>
-          <span className="w-1.5 h-1.5 bg-neon-green rounded-full animate-pulse" />
-          <span className="text-neon-green/80 uppercase tracking-[0.2em]">
-            Arena Online
-          </span>
-          <span className="text-zinc-700">/</span>
-          <span className="text-zinc-500">
-            127 duels active
-          </span>
-          <span className="text-zinc-700">]</span>
-        </div>
+        <ArenaStatus />
 
         {/* Headline */}
         <div className="text-center mb-6 opacity-0 animate-slide-up-delay-1">

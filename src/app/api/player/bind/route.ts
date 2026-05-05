@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { rateLimit, clientKey } from '@/lib/rateLimit';
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 // Bind an authenticated user to a player row.
 // - If a player is already bound to this auth_user_id, return it.
 // - Else if guest_player_id is provided AND that player has no auth binding,

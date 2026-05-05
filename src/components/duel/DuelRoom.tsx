@@ -10,6 +10,7 @@ import OpponentView from '@/components/duel/OpponentView';
 import DuelTimer from '@/components/duel/DuelTimer';
 import PromptBar from '@/components/duel/PromptBar';
 import Countdown from '@/components/duel/Countdown';
+import ChallengeCard from '@/components/duel/ChallengeCard';
 import Badge from '@/components/ui/Badge';
 import { getChallengeById } from '@/lib/challenges';
 import { createClient } from '@/lib/supabase/client';
@@ -31,6 +32,7 @@ function useSupabase() {
 
 type DuelPhase =
   | 'loading'
+  | 'invite'
   | 'waiting'
   | 'countdown'
   | 'active'
@@ -88,41 +90,36 @@ export default function DuelRoom() {
         return;
       }
 
-      // If this player isn't in the duel yet, try to join as player2 via API
-      let resolvedDuel: DuelRow = duelData;
-      if (
-        duelData.player1_id !== player.id &&
-        duelData.player2_id !== player.id
-      ) {
-        if (duelData.status === 'waiting' && !duelData.player2_id) {
-          const joined = await joinDuelById(player.id, duelId);
-          if (!joined) {
-            setPhase('not_found');
-            return;
-          }
-          resolvedDuel = joined;
-        } else {
-          // Duel is full or already started and we're not in it
-          setPhase('not_found');
-          return;
-        }
-      }
-      setDuel(resolvedDuel);
-
-      isPlayer1Ref.current = resolvedDuel.player1_id === player.id;
-
-      const ch = getChallengeById(resolvedDuel.challenge_id);
+      const ch = getChallengeById(duelData.challenge_id);
       if (!ch) {
         setPhase('not_found');
         return;
       }
       setChallenge(ch);
 
-      // Load players
-      const { player1, player2 } = await fetchDuelPlayers(
-        sb,
-        resolvedDuel,
-      );
+      // If the current player isn't in the duel, don't auto-claim P2 — show
+      // an explicit prejoin confirm screen so a stranger who guesses a UUID
+      // can't slip into someone else's invite link uninvited.
+      if (
+        duelData.player1_id !== player.id &&
+        duelData.player2_id !== player.id
+      ) {
+        if (duelData.status === 'waiting' && !duelData.player2_id) {
+          setDuel(duelData);
+          const { player1 } = await fetchDuelPlayers(sb, duelData);
+          setOpponent(player1);
+          setPhase('invite');
+          return;
+        }
+        // Duel is full or already started and we're not in it
+        setPhase('not_found');
+        return;
+      }
+
+      setDuel(duelData);
+      isPlayer1Ref.current = duelData.player1_id === player.id;
+
+      const { player1, player2 } = await fetchDuelPlayers(sb, duelData);
       const opp = isPlayer1Ref.current ? player2 : player1;
       setOpponent(opp);
 
@@ -134,33 +131,41 @@ export default function DuelRoom() {
         judging: 'judging',
         complete: 'complete',
       };
-      setPhase(statusToPhase[resolvedDuel.status] ?? 'loading');
+      setPhase(statusToPhase[duelData.status] ?? 'loading');
     }
 
     init();
   }, [supabase, duelId]);
 
+  const handleConfirmJoin = useCallback(async () => {
+    if (!currentPlayer || !supabase) return;
+    setPhase('loading');
+    const joined = await joinDuelById(currentPlayer.id, duelId);
+    if (!joined) {
+      setPhase('not_found');
+      return;
+    }
+    setDuel(joined);
+    isPlayer1Ref.current = joined.player1_id === currentPlayer.id;
+    const { player1, player2 } = await fetchDuelPlayers(supabase, joined);
+    setOpponent(isPlayer1Ref.current ? player2 : player1);
+    setPhase(joined.status === 'countdown' ? 'countdown' : 'waiting');
+  }, [currentPlayer, supabase, duelId]);
+
   // ---------- SCORING ----------
   const doScoring = useCallback(async () => {
     if (!currentPlayer) return;
-    if (scoringTriggeredRef.current) {
-      console.log('[VibeDuel] Scoring already triggered, skipping');
-      return;
-    }
+    if (scoringTriggeredRef.current) return;
     scoringTriggeredRef.current = true;
     setPhase('judging');
-    console.log('[VibeDuel] Starting AI scoring...');
     try {
       const result = await triggerScoring(duelId, currentPlayer.id);
-      console.log('[VibeDuel] Scoring complete:', result ? 'got result' : 'null result');
       if (result) {
         setScoringResult(result);
       } else {
-        console.error('[VibeDuel] triggerScoring returned null');
         setPhase('complete');
       }
-    } catch (err) {
-      console.error('[VibeDuel] Scoring failed:', err);
+    } catch {
       setPhase('complete');
     }
   }, [duelId, currentPlayer]);
@@ -232,7 +237,6 @@ export default function DuelRoom() {
           .eq('duel_id', duelId);
 
         if (subs && subs.length >= 2) {
-          console.log('[VibeDuel:poll] Both submitted — triggering scoring');
           await doScoring();
         }
       }
@@ -247,9 +251,6 @@ export default function DuelRoom() {
     const forceTimer = setTimeout(async () => {
       if (!active || scoringTriggeredRef.current) return;
       if (await reconstructFromCompletedDuel()) return;
-      console.log(
-        `[VibeDuel:poll] Force-triggering scoring after ${forceDelay}ms`,
-      );
       await doScoring();
     }, forceDelay);
 
@@ -429,8 +430,9 @@ export default function DuelRoom() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ player_id: currentPlayer.id }),
         });
-      } catch (err) {
-        console.error('start endpoint failed:', err);
+      } catch {
+        // Idempotent: a missed start call is recovered by the realtime UPDATE
+        // when the other player's start succeeds.
       }
     }
     setPhase('active');
@@ -439,6 +441,7 @@ export default function DuelRoom() {
   const handleGenerate = useCallback(
     async (prompt: string) => {
       if (!challenge || iterationCount >= MAX_ITERATIONS || isGenerating) return;
+      if (!currentPlayer || !duel) return;
 
       setIsGenerating(true);
 
@@ -457,7 +460,8 @@ export default function DuelRoom() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             prompt,
-            challenge,
+            duel_id: duel.id,
+            player_id: currentPlayer.id,
             existingCode: isRefining ? codeBeforeGeneration : undefined,
           }),
         });
@@ -545,7 +549,7 @@ export default function DuelRoom() {
         }
       }
     },
-    [challenge, iterationCount, isGenerating, code],
+    [challenge, iterationCount, isGenerating, code, currentPlayer, duel],
   );
 
   const handleSubmit = useCallback(async () => {
@@ -651,6 +655,35 @@ export default function DuelRoom() {
             </Link>
             <Link href="/duel">
               <Button variant="ghost">BACK TO LOBBY</Button>
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (phase === 'invite' && challenge) {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-arena-black px-4 py-12 noise">
+        <div className="w-full max-w-md space-y-5 text-center">
+          <p className="text-[10px] text-zinc-700 font-mono uppercase tracking-[0.3em]">
+            You&apos;ve been invited to a duel
+          </p>
+          <h2 className="text-2xl font-black text-white uppercase tracking-tight">
+            {opponent?.username ?? 'A challenger'} is waiting
+          </h2>
+          {opponent && (
+            <p className="text-[10px] text-zinc-600 font-mono uppercase tracking-wider">
+              ELO {opponent.elo}
+            </p>
+          )}
+          <div className="text-left">
+            <ChallengeCard challenge={challenge} />
+          </div>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+            <Button onClick={handleConfirmJoin}>JOIN DUEL</Button>
+            <Link href={`/duel/${duelId}/watch`}>
+              <Button variant="ghost">WATCH INSTEAD</Button>
             </Link>
           </div>
         </div>

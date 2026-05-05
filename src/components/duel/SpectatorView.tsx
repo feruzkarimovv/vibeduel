@@ -198,13 +198,18 @@ function PlayerPane({
   readonly submission: SubmissionRow | null;
   readonly isWinner: boolean;
 }) {
-  const accent = side === 'left' ? 'neon-green' : 'neon-magenta';
+  // Static class names — Tailwind's JIT won't compile interpolated tokens
+  // like `border-${accent}/40`, so the avatar's color was silently missing.
+  const avatarClass =
+    side === 'left'
+      ? 'border-neon-green/40 text-neon-green'
+      : 'border-neon-magenta/40 text-neon-magenta';
   return (
     <div className="flex-1 flex flex-col min-h-0 p-3 gap-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div
-            className={`w-7 h-7 border border-${accent}/40 bg-arena-mid flex items-center justify-center text-[10px] font-mono font-bold text-${accent}`}
+            className={`w-7 h-7 border ${avatarClass} bg-arena-mid flex items-center justify-center text-[10px] font-mono font-bold`}
           >
             {player?.username.charAt(0).toUpperCase() ?? '?'}
           </div>

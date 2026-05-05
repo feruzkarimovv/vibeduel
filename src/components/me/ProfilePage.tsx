@@ -192,9 +192,10 @@ export default function ProfilePage() {
                   .reverse()
                   .slice(0, 20)
                   .map((p, i) => (
-                    <div
+                    <Link
                       key={p.id}
-                      className="grid grid-cols-[3rem_1fr_4rem_5rem] gap-2 px-4 py-2.5 border-b border-arena-line/50 last:border-b-0 text-xs font-mono"
+                      href={`/duel/${p.id}/watch`}
+                      className="grid grid-cols-[3rem_1fr_4rem_5rem] gap-2 px-4 py-2.5 border-b border-arena-line/50 last:border-b-0 text-xs font-mono hover:bg-arena-mid/30 transition-colors"
                     >
                       <span className="text-zinc-700">{history.length - i}</span>
                       <span className="text-zinc-500">
@@ -214,7 +215,7 @@ export default function ProfilePage() {
                       <span className="text-right text-neon-green tabular-nums">
                         {p.eloAfter}
                       </span>
-                    </div>
+                    </Link>
                   ))}
               </div>
             )}

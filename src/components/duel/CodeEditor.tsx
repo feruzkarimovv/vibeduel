@@ -16,6 +16,7 @@ export default function CodeEditor({
   readOnly = false,
 }: CodeEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const gutterRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom while streaming
   useEffect(() => {
@@ -23,6 +24,19 @@ export default function CodeEditor({
       textareaRef.current.scrollTop = textareaRef.current.scrollHeight;
     }
   }, [code, isStreaming]);
+
+  // Keep the line-number gutter in lock-step with the textarea's scroll
+  // position. Without this, line numbers drift past ~30 lines.
+  useEffect(() => {
+    const ta = textareaRef.current;
+    const gutter = gutterRef.current;
+    if (!ta || !gutter) return;
+    const sync = () => {
+      gutter.scrollTop = ta.scrollTop;
+    };
+    ta.addEventListener('scroll', sync, { passive: true });
+    return () => ta.removeEventListener('scroll', sync);
+  }, []);
 
   const lineCount = code ? code.split('\n').length : 0;
   const charCount = code.length;
@@ -56,8 +70,9 @@ export default function CodeEditor({
 
       {/* Editor body with line numbers */}
       <div className="flex-1 relative flex overflow-hidden">
-        {/* Line numbers */}
+        {/* Line numbers — scroll-synced to the textarea */}
         <div
+          ref={gutterRef}
           className="flex-shrink-0 py-4 px-2 text-right select-none overflow-hidden bg-arena-black/50 border-r border-arena-line"
           aria-hidden="true"
         >

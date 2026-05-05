@@ -27,15 +27,8 @@ export async function triggerScoring(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ player_id: playerId }),
   });
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    console.error('[VibeDuel:scoring] finalize failed:', res.status, errText);
-    return null;
-  }
+  if (!res.ok) return null;
   const body = await res.json();
-  if (body?.error) {
-    console.error('[VibeDuel:scoring] finalize error:', body.error);
-    return null;
-  }
+  if (body?.error) return null;
   return body as ScoringResult;
 }

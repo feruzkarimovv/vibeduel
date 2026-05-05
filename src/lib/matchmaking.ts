@@ -19,10 +19,7 @@ export async function findOrCreateDuel(
       private: options?.private ?? false,
     }),
   });
-  if (!res.ok) {
-    console.error('findOrCreateDuel failed:', res.status, await res.text().catch(() => ''));
-    return null;
-  }
+  if (!res.ok) return null;
   const { duel } = await res.json();
   return duel as DuelRow;
 }

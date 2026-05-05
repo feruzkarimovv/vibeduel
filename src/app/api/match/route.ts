@@ -3,6 +3,9 @@ import { getAdminClient } from '@/lib/supabase/admin';
 import { rateLimit, clientKey } from '@/lib/rateLimit';
 import { getChallengeById } from '@/lib/challenges';
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 const STALE_DUEL_AGE_SECONDS = 120;
 
 export async function POST(req: Request) {

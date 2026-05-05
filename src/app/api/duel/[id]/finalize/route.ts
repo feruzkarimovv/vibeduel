@@ -6,6 +6,9 @@ import { getChallengeById } from '@/lib/challenges';
 import type { ScoringResult, ScoreBreakdown } from '@/lib/scoring';
 import type { DuelRow } from '@/types';
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 const FORFEIT_WIN: ScoreBreakdown = {
   functionality: 20,
   visual_design: 20,

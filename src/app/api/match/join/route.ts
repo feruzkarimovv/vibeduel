@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { rateLimit, clientKey } from '@/lib/rateLimit';
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 // Direct join: a player visits /duel/[id] (e.g. via shared invite link) and
 // claims the open player2 slot for that specific duel.
 export async function POST(req: Request) {

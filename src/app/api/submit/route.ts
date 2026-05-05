@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { rateLimit, clientKey } from '@/lib/rateLimit';
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 const MAX_CODE_LEN = 50000;
 
 export async function POST(req: Request) {
